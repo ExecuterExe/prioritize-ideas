@@ -8,7 +8,7 @@ import type {Transport, TransportStatus} from './transport'
 
 type Msg =
   | {k: 'act'; from: string; seq: number; a: Action}
-  | {k: 'ack'; to: string; seq: number; err?: string}
+  | {k: 'ack'; to: string; seq: number; err?: string; ver?: number}
   | {k: 'state'; v: PublicView}
   | {k: 'sync'; from: string}
 
@@ -61,6 +61,7 @@ export class HostSession {
   private acks = new Map<string, Msg>()
   private broadcastTimer?: ReturnType<typeof setTimeout>
   private heartbeat?: ReturnType<typeof setInterval>
+  private repeatTimer?: ReturnType<typeof setTimeout>
 
   constructor(stage: Stage, private onChange: (s: Stage) => void, private transport?: Transport, key?: CryptoKey) {
     this.set(stage)
@@ -117,7 +118,7 @@ export class HostSession {
     } catch (e) {
       err = e instanceof Error ? e.message : 'Ошибка'
     }
-    const ack: Msg = {k: 'ack', to: m.from, seq: m.seq, ...(err ? {err} : {})}
+    const ack: Msg = {k: 'ack', to: m.from, seq: m.seq, ver: this.stage.value.version, ...(err ? {err} : {})}
     this.acks.set(id, ack)
     if (this.acks.size > 2000) this.acks.delete(this.acks.keys().next().value!)
     void this.channel!.send(ack)
@@ -126,7 +127,13 @@ export class HostSession {
 
   private scheduleBroadcast(delay = 300) {
     if (!this.channel || this.broadcastTimer) return
-    this.broadcastTimer = setTimeout(() => { this.broadcastTimer = undefined; this.broadcastNow() }, delay)
+    this.broadcastTimer = setTimeout(() => {
+      this.broadcastTimer = undefined
+      this.broadcastNow()
+      // Повтор через 1,5 с: публичные релеи иногда теряют отдельные сообщения
+      clearTimeout(this.repeatTimer)
+      this.repeatTimer = setTimeout(() => this.broadcastNow(), 1500)
+    }, delay)
   }
 
   broadcastNow() {
@@ -139,6 +146,7 @@ export class HostSession {
   close() {
     clearInterval(this.heartbeat)
     clearTimeout(this.broadcastTimer)
+    clearTimeout(this.repeatTimer)
     this.transport?.close()
   }
 }
@@ -229,6 +237,8 @@ export class ClientSession {
     if (m.k === 'ack' && m.to === this.pid) {
       this.hostSeen.value = Date.now()
       this.finish(m.seq, m.err ?? null)
+      // Подтверждение пришло, а состояние отстаёт — значит, рассылка потерялась
+      if (m.ver && (this.view.value?.version ?? 0) < m.ver - 1) this.requestSync()
     } else if (m.k === 'state') {
       this.hostSeen.value = Date.now()
       const cur = this.view.value
