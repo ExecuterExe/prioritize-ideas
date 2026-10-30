@@ -2,7 +2,7 @@
 import {useState} from 'preact/hooks'
 import type {PublicView} from '../core/engine'
 import {cardSubtitle, cardTitle} from '../core/library'
-import {Badges, CardBody, Dist, Matrix} from './common'
+import {Badges, CardBody, CountUp, Dist, Matrix} from './common'
 import type {Action} from '../core/engine'
 
 type Send = (a: Action) => Promise<string | null>
@@ -26,10 +26,24 @@ export function ResultsView({view, send, canArgue}: {view: PublicView; send?: Se
   if (!res) return null
   const crit = view.criteria.filter(c => c.approved)
   const cardById = (id: string) => view.cards.find(c => c.id === id)
+  const leader = res.cards[0]
+  const leaderCard = leader && cardById(leader.cardId)
   return (
-    <div class="stack">
-      {res.leaderStable !== null && (
-        <div class={res.leaderStable ? 'note' : 'hint'}>{res.leaderStable ? '✅ ' : '⚠️ '}{res.stabilityNote}</div>
+    <div class="stack stagger">
+      {leader && leaderCard && leader.score !== null && (
+        <div class="card leader">
+          <div class="row between" style={{alignItems: 'flex-start', position: 'relative', zIndex: 1}}>
+            <div style={{flex: 1, minWidth: 200}}>
+              <div class="leader-kicker">🏆 Лидер команды</div>
+              <h2 style={{margin: '8px 0 4px', fontSize: '1.35rem'}}>{cardTitle(view.type, leaderCard.fields)}</h2>
+              <div class="small">{cardSubtitle(view.type, leaderCard.fields)}</div>
+            </div>
+            <div class="score-big"><CountUp value={leader.score} /></div>
+          </div>
+          {res.leaderStable !== null && (
+            <div class="small" style={{marginTop: 12, position: 'relative', zIndex: 1}}>{res.leaderStable ? '✅ ' : '⚠️ '}{res.stabilityNote}</div>
+          )}
+        </div>
       )}
       {res.cards.map(r => {
         const card = cardById(r.cardId)
@@ -37,43 +51,44 @@ export function ResultsView({view, send, canArgue}: {view: PublicView; send?: Se
         const decision = view.decisions.find(d => d.cardId === r.cardId)
         return (
           <div class="card" key={r.cardId}>
-            <div class="row between" style={{alignItems: 'flex-start'}}>
-              <div style={{flex: 1, minWidth: 200}}>
-                <div class="row" style={{gap: 6}}>
-                  <span class={`rank ${r.rank === 1 ? 'top' : ''}`}>{r.rank}</span>
+            <div class="row" style={{alignItems: 'flex-start', gap: 12, flexWrap: 'nowrap'}}>
+              <span class={`rank ${r.rank === 1 ? 'top' : ''}`}>{r.rank}</span>
+              <div style={{flex: 1, minWidth: 0}}>
+                <CardBody type={view.type} card={card} />
+                <div class="row" style={{gap: 6, marginTop: 6}}>
                   {decision?.status === 'chosen' && <span class="chip ok">✅ Выбрано</span>}
                   {decision?.status === 'deferred' && <span class="chip warn">⏸ Отложено</span>}
                   {decision?.status === 'rejected' && <span class="chip bad">✖ Отклонено</span>}
                   <Badges r={r} />
                 </div>
-                <div style={{marginTop: 6}}><CardBody type={view.type} card={card} /></div>
               </div>
-              <details class="no-print" style={{textAlign: 'right'}}>
-                <summary class="score-big" style={{cursor: 'pointer', listStyle: 'none'}} title="Нажмите, чтобы увидеть расчёт">{r.score ?? '—'}</summary>
-                <div class="small muted" style={{textAlign: 'left', maxWidth: 280}}>
-                  Балл = средние по критериям × веса, переведено в 0–100.<br />
-                  {crit.map(c => {
-                    const p = r.perCriterion.find(x => x.criterionId === c.id)
-                    return <div key={c.id}>{c.name}: {p?.mean?.toFixed(2) ?? '—'} × {c.weight}{c.inverted ? ' (обратный)' : ''}</div>
-                  })}
-                </div>
-              </details>
+              <div class="score-big" style={{fontSize: '1.8rem'}}>{r.score === null ? '—' : <CountUp value={r.score} />}</div>
             </div>
-            <div class="bar" style={{margin: '8px 0'}}><i style={{width: `${r.score ?? 0}%`}} /></div>
-            <div class="grid" style={{gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))'}}>
-              {crit.map(c => {
-                const p = r.perCriterion.find(x => x.criterionId === c.id)
-                const shift = p?.prevRange != null && p.range != null ? ` · разброс ${p.prevRange} → ${p.range}` : ''
-                return (
-                  <div key={c.id}>
-                    <div class="small" style={{fontWeight: 600}}>{c.name} {p?.disputed && <span title="спорно">⚡</span>}</div>
-                    <Dist values={p?.values ?? []} />
-                    <div class="tiny muted">среднее {p?.mean?.toFixed(1) ?? '—'} · медиана {p?.median ?? '—'}{shift}</div>
-                  </div>
-                )
-              })}
-            </div>
-            {r.guessShare > 0 && <div class="tiny muted" style={{marginTop: 6}}>Оценок «на догадке»: {Math.round(r.guessShare * 100)}%</div>}
+            <div class="bar" style={{margin: '12px 0 4px'}}><i style={{width: `${r.score ?? 0}%`}} /></div>
+            <details class="more" open={r.disputed}>
+              <summary>Оценки по критериям</summary>
+              <div class="grid" style={{gridTemplateColumns: 'repeat(auto-fill, minmax(150px, 1fr))', marginTop: 8}}>
+                {crit.map(c => {
+                  const p = r.perCriterion.find(x => x.criterionId === c.id)
+                  const shift = p?.prevRange != null && p.range != null ? ` · разброс ${p.prevRange} → ${p.range}` : ''
+                  return (
+                    <div key={c.id}>
+                      <div class="small" style={{fontWeight: 700}}>{c.name} {p?.disputed && <span title="спорно">⚡</span>}</div>
+                      <Dist values={p?.values ?? []} />
+                      <div class="tiny muted">среднее {p?.mean?.toFixed(1) ?? '—'}{shift}</div>
+                    </div>
+                  )
+                })}
+              </div>
+              <div class="tiny muted" style={{marginTop: 8}}>
+                Как считается: средние по критериям × веса → шкала 0–100.
+                {crit.map(c => {
+                  const p = r.perCriterion.find(x => x.criterionId === c.id)
+                  return ` ${c.name}: ${p?.mean?.toFixed(2) ?? '—'}×${c.weight}${c.inverted ? ' (обратный)' : ''}.`
+                }).join('')}
+                {r.guessShare > 0 ? ` Оценок «на догадке»: ${Math.round(r.guessShare * 100)}%.` : ''}
+              </div>
+            </details>
             <Args view={view} cardId={r.cardId} send={send} canArgue={canArgue && (r.disputed || r.gem)} />
           </div>
         )

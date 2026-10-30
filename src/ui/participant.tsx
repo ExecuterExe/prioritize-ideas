@@ -5,7 +5,8 @@ import {CARD_FIELDS, LIBRARY, cardTitle} from '../core/library'
 import {lintCard} from '../core/lint'
 import {BASIS_LABEL, type Basis, type Score} from '../core/types'
 import {lsGet, lsSet} from '../store/db'
-import {Anchors, CardBody, ErrorLine, ScoreButtons, plural} from './common'
+import {AnchorLine, Anchors, Avatars, CardBody, ErrorLine, PhaseIntro, ScoreButtons, Waiting, plural} from './common'
+import {toast} from './toast'
 import {ResultsView, SummaryView} from './results'
 
 export type Send = (a: Action) => Promise<string | null>
@@ -59,10 +60,13 @@ export function ParticipantStage({view, pid, send, storeKey}: Props) {
   switch (view.phase) {
     case 'lobby':
       return (
-        <div class="card stack">
-          <h2>Вы в комнате, {me.name}</h2>
-          <p class="muted">Ждём, пока организатор начнёт. Сейчас в комнате: {view.participants.filter(p => p.active).map(p => p.name).join(', ')}.</p>
-          <div class="note">Как это работает: сначала каждый молча пишет свои варианты, потом склеиваем дубли, выбираем критерии и оцениваем вслепую — чужие оценки откроются только в конце.</div>
+        <div class="stack">
+          <PhaseIntro emoji="👋" title={`Привет, ${me.name}!`}>Вы в комнате. Как только все соберутся, организатор начнёт.</PhaseIntro>
+          <div class="card stack">
+            <b>Уже здесь</b>
+            <Avatars people={view.participants.filter(p => p.active)} />
+          </div>
+          <div class="card small muted">Сначала каждый молча пишет свои варианты, потом выбираем критерии и оцениваем вслепую — чужие оценки откроются только в конце.</div>
         </div>
       )
     case 'generate':
@@ -82,9 +86,9 @@ export function ParticipantStage({view, pid, send, storeKey}: Props) {
     case 'decide':
       return (
         <div class="stack">
-          <div class="note">{view.phase === 'results'
-            ? 'Результаты открыты. У спорных карточек (⚡) и «бриллиантов» (💎) можно анонимно добавить аргумент.'
-            : 'Команда принимает решение. Организатор отмечает выбранное.'}</div>
+          {view.phase === 'results'
+            ? <PhaseIntro emoji="✨" title="Результаты открыты">У спорных ⚡ и «бриллиантов» 💎 можно анонимно добавить аргумент.</PhaseIntro>
+            : <PhaseIntro emoji="🤝" title="Команда решает">Организатор отмечает выбранное — следите за значками.</PhaseIntro>}
           <ResultsView view={view} send={send} canArgue />
         </div>
       )
@@ -98,6 +102,7 @@ type StepProps = {view: PublicView; local: Local; update: (f: (l: Local) => Loca
 function Generate({view, local, update, send}: StepProps) {
   const fields = CARD_FIELDS[view.type]
   const [editing, setEditing] = useState<LocalCard | null>(null)
+  const [showOptional, setShowOptional] = useState(false)
   const [err, setErr] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const limit = view.settings.cardLimit
@@ -105,7 +110,12 @@ function Generate({view, local, update, send}: StepProps) {
   const unsent = local.cards.filter(c => !c.sent)
 
   const draft = editing ?? {id: '', fields: view.type === 'idea' && view.sourceProblem ? {} : {}, sent: false}
-  const setField = (k: string, v: string) => setEditing({...draft, id: draft.id || newId(), fields: {...draft.fields, [k]: v}})
+  // Обновляем от предыдущего состояния: при автозаполнении несколько полей меняются подряд
+  const blank = (): LocalCard => ({id: newId(), fields: {}, sent: false})
+  const setField = (k: string, v: string) => setEditing(prev => {
+    const d = prev ?? blank()
+    return {...d, fields: {...d.fields, [k]: v}}
+  })
   const hints = lintCard(view.type, draft.fields)
   const missing = fields.filter(f => f.required && !draft.fields[f.key]?.trim())
   const canSave = missing.length === 0 && !!draft.basis
@@ -136,6 +146,8 @@ function Generate({view, local, update, send}: StepProps) {
     if (!r) {
       update(l => ({...l, cards: l.cards.map(c => (c.id === card.id ? {...c, sent: true} : c))}))
       setEditing(null)
+      setShowOptional(false)
+      toast('Карточка отправлена')
     } else if (r.startsWith('Лимит')) {
       update(l => ({...l, cards: l.cards.filter(c => c.id !== card.id || c.sent)}))
     }
@@ -143,17 +155,18 @@ function Generate({view, local, update, send}: StepProps) {
 
   const remove = async (c: LocalCard) => {
     const r = await send({type: 'card.delete', id: c.id})
-    if (!r) update(l => ({...l, cards: l.cards.filter(x => x.id !== c.id)}))
+    if (!r) { update(l => ({...l, cards: l.cards.filter(x => x.id !== c.id)})); toast('Карточка удалена', 'info') }
     setErr(r)
   }
 
   const others = Object.entries(view.cardCounts).reduce((a, [, n]) => a + n, 0) - sentCount
   return (
     <div class="stack">
-      <div class="note">
-        Пишите молча и независимо: чужие карточки откроются на следующем шаге. До {plural(limit, 'карточки', 'карточек', 'карточек')} на человека.
-        {view.sourceProblem && <div style={{marginTop: 6}}><b>Проблема:</b> {view.sourceProblem}</div>}
-      </div>
+      <PhaseIntro emoji="🤫" title={view.type === 'idea' ? 'Ваши идеи' : 'Ваши проблемы'}>
+        Пишите сами, не советуясь. До {plural(limit, 'карточки', 'карточек', 'карточек')}.
+      </PhaseIntro>
+      {view.sourceProblem && <div class="note"><b>Решаем проблему:</b> {view.sourceProblem}</div>}
+      <div class="stagger stack">
       {local.cards.map(c => (
         <div class="card" key={c.id}>
           <div class="row between">
@@ -166,10 +179,18 @@ function Generate({view, local, update, send}: StepProps) {
           </div>
         </div>
       ))}
+      </div>
+      {!editing && local.cards.length >= limit && (
+        <div class="card waiting">
+          <div class="waiting-check" aria-hidden="true">✓</div>
+          <h2>Все карточки написаны</h2>
+          <p class="muted">Можно поправить их, пока идёт этот шаг.</p>
+        </div>
+      )}
       {(editing || local.cards.length < limit) && (
         <div class="card stack">
           <h3>{editing && local.cards.some(c => c.id === editing.id) ? 'Редактирование' : `Новая карточка (${local.cards.length + 1} из ${limit})`}</h3>
-          {fields.map(f => (
+          {fields.filter(f => f.required || showOptional || draft.fields[f.key]).map(f => (
             <label class="field" key={f.key}>
               <span>{f.label}{f.required ? ' *' : ''}</span>
               {f.multiline
@@ -177,12 +198,17 @@ function Generate({view, local, update, send}: StepProps) {
                 : <input type="text" placeholder={f.hint} value={draft.fields[f.key] ?? ''} maxLength={200} onInput={e => setField(f.key, (e.target as HTMLInputElement).value)} />}
             </label>
           ))}
+          {!showOptional && fields.some(f => !f.required && !draft.fields[f.key]) && (
+            <button type="button" class="ghost small" style={{alignSelf: 'flex-start'}} onClick={() => setShowOptional(true)}>
+              + {fields.filter(f => !f.required).map(f => f.label.toLowerCase()).join(', ')}
+            </button>
+          )}
           <div>
-            <div class="small" style={{fontWeight: 600, marginBottom: 4}}>Откуда мы это знаем? *</div>
+            <div class="small" style={{fontWeight: 700, marginBottom: 6}}>Откуда мы это знаем?</div>
             <div class="row">
               {(Object.keys(BASIS_LABEL) as Basis[]).map(b => (
                 <button key={b} type="button" class={`small ${draft.basis === b ? 'selected' : ''}`}
-                  onClick={() => setEditing({...draft, id: draft.id || newId(), basis: b})}>{BASIS_LABEL[b]}</button>
+                  onClick={() => setEditing(prev => ({...(prev ?? blank()), basis: b}))}>{BASIS_LABEL[b]}</button>
               ))}
             </div>
           </div>
@@ -192,7 +218,7 @@ function Generate({view, local, update, send}: StepProps) {
             <button class="primary" disabled={!canSave || busy} onClick={save}>{busy ? 'Отправляем…' : 'Сохранить карточку'}</button>
             {editing && <button class="ghost" onClick={() => { setEditing(null); setErr(null) }}>Отмена</button>}
           </div>
-          {!canSave && <div class="tiny muted">Заполните поля со звёздочкой и выберите, откуда это известно.</div>}
+          {!canSave && <div class="tiny muted">Заполните поля со звёздочкой и отметьте, откуда это известно.</div>}
         </div>
       )}
       <div class="muted small">У остальных уже {plural(Math.max(0, others), 'карточка', 'карточки', 'карточек')}.</div>
@@ -205,13 +231,14 @@ function MergeView({view, send, isMine}: {view: PublicView; send: Send; isMine: 
   const [msg, setMsg] = useState<string | null>(null)
   const suggest = async (a: string, b: string) => {
     const r = await send({type: 'merge.suggest', a, b})
-    setMsg(r ?? 'Предложение отправлено организатору')
+    if (r) setMsg(r)
+    else toast('Предложение отправлено организатору')
     setPick(null)
   }
   return (
     <div class="stack">
-      <div class="note">Все карточки команды (без авторов). Если две карточки об одном и том же — нажмите «Похожа» на обеих, организатор их склеит. Сейчас уточняем, а не критикуем.</div>
-      {msg && <div class="note">{msg}</div>}
+      <PhaseIntro emoji="🧩" title="Все карточки команды">Видите две об одном и том же? Нажмите «Похожа» на обеих — организатор склеит.</PhaseIntro>
+      {msg && <div class="error">{msg}</div>}
       {view.cards.map(c => (
         <div class="card" key={c.id} style={pick === c.id ? {outline: '2px solid var(--accent)'} : undefined}>
           <div class="row between" style={{alignItems: 'flex-start'}}>
@@ -238,11 +265,12 @@ function CriteriaPropose({view, send}: {view: PublicView; send: Send}) {
   const propose = async (a: Action) => {
     const r = await send(a)
     setErr(r)
+    if (!r) toast('Критерий предложен')
     return r
   }
   return (
     <div class="stack">
-      <div class="note">Договариваемся, по чему оцениваем. Предложите критерий — организатор утвердит итоговый список. Лучше 3–4 критерия.</div>
+      <PhaseIntro emoji="📏" title="По чему оцениваем">Предложите критерий — организатор утвердит итоговый список.</PhaseIntro>
       <div class="card">
         <h3>Текущие критерии</h3>
         {view.criteria.map(c => (
@@ -296,11 +324,12 @@ function Calibrate({view, local, update, send, pid}: StepProps) {
   const crit = view.criteria.filter(c => c.approved)
   const [err, setErr] = useState<string | null>(null)
   const done = view.progress[pid]
+  const [again, setAgain] = useState(false)
   const complete = crit.every(c => c.id in local.calib)
   if (!view.calibrationCard) return <div class="card">Нет карточки для калибровки.</div>
   return (
     <div class="stack">
-      <div class="note">Калибровка: оцените одну пробную карточку. Это не идёт в итог — проверяем, одинаково ли мы понимаем шкалы.</div>
+      <PhaseIntro emoji="🎚️" title="Сверяем шкалы">Оцените пробную карточку — это не идёт в итог.</PhaseIntro>
       <div class="card"><CardBody type={view.type} card={view.calibrationCard} full /></div>
       {view.calibration ? (
         <div class="card stack">
@@ -316,6 +345,8 @@ function Calibrate({view, local, update, send, pid}: StepProps) {
             ) : null
           })}
         </div>
+      ) : done && !again ? (
+        <Waiting view={view} title="Спасибо!" onEdit={() => setAgain(true)} />
       ) : (
         <>
           {crit.map(c => (
@@ -323,13 +354,15 @@ function Calibrate({view, local, update, send, pid}: StepProps) {
               <b>{c.name}</b>
               <div class="small muted" style={{marginBottom: 6}}>{c.question}</div>
               <ScoreButtons value={local.calib[c.id]} onChange={v => update(l => ({...l, calib: {...l.calib, [c.id]: v}}))} />
-              <Anchors c={c} />
+              <AnchorLine c={c} value={local.calib[c.id]} />
             </div>
           ))}
           <ErrorLine msg={err} />
-          <button class="primary" disabled={!complete} onClick={async () => setErr(await send({type: 'calib.submit', ratings: crit.map(c => ({criterionId: c.id, value: local.calib[c.id] ?? null}))}))}>
-            {done ? 'Отправлено ✓ (отправить заново)' : 'Отправить'}
-          </button>
+          <button class="primary" disabled={!complete} onClick={async () => {
+            const r = await send({type: 'calib.submit', ratings: crit.map(c => ({criterionId: c.id, value: local.calib[c.id] ?? null}))})
+            setErr(r)
+            if (!r) { setAgain(false); toast('Отправлено') }
+          }}>Отправить</button>
         </>
       )}
     </div>
@@ -340,14 +373,16 @@ function Shortlist({view, local, update, send, pid, isMine}: StepProps & {isMine
   const quota = view.approvalQuota
   const [err, setErr] = useState<string | null>(null)
   const chosen = local.approvals.filter(id => view.cards.some(c => c.id === id))
+  const [again, setAgain] = useState(false)
   const toggle = (id: string) => update(l => {
     const has = l.approvals.includes(id)
     if (!has && chosen.length >= quota) return l
     return {...l, approvals: has ? l.approvals.filter(x => x !== id) : [...l.approvals, id]}
   })
+  if (view.progress[pid] && !again) return <Waiting view={view} title="Отметки отправлены" onEdit={() => setAgain(true)} editLabel="Изменить выбор" />
   return (
     <div class="stack">
-      <div class="note">Карточек много, поэтому сначала быстрый отбор: отметьте до {quota} самых перспективных. Отметки других скрыты. Дальше пройдут 5 лучших.</div>
+      <PhaseIntro emoji="🎯" title={`Отметьте до ${quota} лучших`}>Отметки других скрыты. Дальше пройдут 5 финалистов.</PhaseIntro>
       {view.cards.map(c => (
         <div class="card" key={c.id} onClick={() => toggle(c.id)} style={{cursor: 'pointer', ...(chosen.includes(c.id) ? {outline: '2px solid var(--accent)'} : {})}}>
           <div class="row between" style={{alignItems: 'flex-start'}}>
@@ -357,8 +392,12 @@ function Shortlist({view, local, update, send, pid, isMine}: StepProps & {isMine
         </div>
       ))}
       <ErrorLine msg={err} />
-      <button class="primary" disabled={!chosen.length} onClick={async () => setErr(await send({type: 'approve.submit', cardIds: chosen}))}>
-        {view.progress[pid] ? `Отправлено ✓ (${chosen.length} из ${quota}) — обновить` : `Отправить (${chosen.length} из ${quota})`}
+      <button class="primary" disabled={!chosen.length} onClick={async () => {
+        const r = await send({type: 'approve.submit', cardIds: chosen})
+        setErr(r)
+        if (!r) { setAgain(false); toast('Отметки отправлены') }
+      }}>
+        Отправить ({chosen.length} из {quota})
       </button>
     </div>
   )
@@ -388,6 +427,7 @@ function Rate({view, local, update, send, pid, round, isMine}: StepProps & {roun
   const filled = (cardId: string) => crit.every(c => key(cardId, c.id) in local.ratings)
   const complete = cards.every(c => filled(c.id))
   const done = view.progress[pid]
+  const [again, setAgain] = useState(false)
   const card = cards[Math.min(i, cards.length - 1)]
   if (!card) return <div class="card">Нет карточек для оценки.</div>
 
@@ -400,14 +440,16 @@ function Rate({view, local, update, send, pid, round, isMine}: StepProps & {roun
     })
     setBusy(false)
     setErr(r)
+    if (!r) { setAgain(false); toast('Оценки отправлены') }
   }
+
+  if (done && !again) return <Waiting view={view} title="Оценки отправлены" onEdit={() => setAgain(true)} editLabel="Изменить оценки" />
 
   return (
     <div class="stack">
-      <div class="note">
-        {round === 2 ? 'Второй раунд: переоцените только спорные карточки — после обсуждения. ' : 'Оценивайте сами, не советуясь. '}
-        Чужие оценки скрыты до раскрытия. Отправленные оценки можно менять, пока организатор не открыл результаты.
-      </div>
+      {round === 2
+        ? <PhaseIntro emoji="🔁" title="Второй раунд">Переоцените спорные карточки — уже после обсуждения.</PhaseIntro>
+        : <PhaseIntro emoji="🙈" title="Оцените вслепую">Сами, не советуясь. Чужие оценки скрыты до раскрытия.</PhaseIntro>}
       <div class="row between">
         <span class="small muted">Карточка {i + 1} из {cards.length}</span>
         <div class="row" style={{gap: 4}}>
@@ -427,7 +469,7 @@ function Rate({view, local, update, send, pid, round, isMine}: StepProps & {roun
           <div class="row"><b>{c.name}</b>{c.inverted && <span class="chip">меньше — лучше</span>}</div>
           {c.question && <div class="small muted" style={{marginBottom: 6}}>{c.question}</div>}
           <ScoreButtons value={local.ratings[key(card.id, c.id)]} onChange={v => update(l => ({...l, ratings: {...l.ratings, [key(card.id, c.id)]: v}}))} />
-          <Anchors c={c} />
+          <AnchorLine c={c} value={local.ratings[key(card.id, c.id)]} />
         </div>
       ))}
       {round === 1 && (
@@ -445,7 +487,7 @@ function Rate({view, local, update, send, pid, round, isMine}: StepProps & {roun
         {i < cards.length - 1 && <button class="primary" onClick={() => setI(i + 1)}>Дальше →</button>}
         <span class="spacer" />
         {(i === cards.length - 1 || complete) && (
-          <button class="primary" disabled={!complete || busy} onClick={submit}>{busy ? 'Отправляем…' : done ? 'Отправлено ✓ — обновить' : 'Отправить оценки'}</button>
+          <button class="primary" disabled={!complete || busy} onClick={submit}>{busy ? 'Отправляем…' : 'Отправить оценки'}</button>
         )}
       </div>
       {!complete && <div class="tiny muted">Чтобы отправить, заполните все критерии у всех карточек (можно «Не могу оценить»).</div>}

@@ -3,6 +3,7 @@ import {useEffect, useState} from 'preact/hooks'
 import './ui/style.css'
 import {HostApp} from './ui/host'
 import {JoinApp} from './ui/join'
+import {Toaster} from './ui/toast'
 
 declare const __SINGLE__: boolean
 
@@ -18,8 +19,12 @@ function App() {
     window.addEventListener('hashchange', on)
     return () => window.removeEventListener('hashchange', on)
   }, [])
-  if (join && !__SINGLE__) return <JoinApp key={join.roomId} roomId={join.roomId} secret={join.key} />
-  return <HostApp />
+  return (
+    <>
+      {join && !__SINGLE__ ? <JoinApp key={join.roomId} roomId={join.roomId} secret={join.key} /> : <HostApp />}
+      <Toaster />
+    </>
+  )
 }
 
 render(<App />, document.getElementById('app')!)

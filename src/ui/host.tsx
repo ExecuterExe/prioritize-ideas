@@ -8,9 +8,10 @@ import {fromB64u, importKey, randomBytes, sha256hex, toB64u} from '../net/crypto
 import {NostrTransport, type RelayState} from '../net/nostr'
 import {HostSession} from '../net/session'
 import {deleteProject, downloadFile, listProjects, loadProject, lsGet, lsSet, saveProject, withStage, type StoredProject} from '../store/db'
-import {CardBody, ErrorLine, PhaseSteps, QR, Timer, plural} from './common'
+import {Avatar, Avatars, CardBody, ErrorLine, PhaseIntro, PhaseSteps, QR, Ring, Timer, plural, stepLabel} from './common'
 import {ParticipantStage} from './participant'
 import {ResultsView, SummaryView} from './results'
+import {toast} from './toast'
 
 declare const __SINGLE__: boolean
 
@@ -351,47 +352,61 @@ function StageUI({project, session, transport, joinUrl, onExit, onNextStage}: {
     host({type: 'phase.next'})
   }
 
+  const myTurn = !single && BLIND_PHASES.has(view.phase) && (view.phase === 'generate' ? !view.cardCounts[hostPid] : !view.progress[hostPid])
+
   return (
     <div class={projector ? 'projector' : ''}>
       <div class="topbar">
-        <div class="inner">
-          <button class="small ghost no-print" onClick={onExit} title="К проектам">←</button>
+        <div class="inner bar-main">
+          <button class="ghost icon-btn no-print" onClick={onExit} title="К проектам" aria-label="К проектам">←</button>
           <div style={{minWidth: 0}}>
-            <div class="tiny muted">{project.title} · {view.type === 'problem' ? 'Проблема' : 'Идея'}</div>
+            <div class="step-label">{stepLabel(view)} · {view.type === 'problem' ? 'Проблема' : 'Идея'}</div>
             <div class="phase-title">{PHASE_LABEL[view.phase]}</div>
           </div>
-          <Timer deadline={view.deadline} />
-          {view.deadline && <button class="small" onClick={() => host({type: 'deadline.extend', minutes: 2})}>+2 мин</button>}
-          {showsProgress && <span class="chip">{submitted}/{active.length} отправили</span>}
-          {!single && <span title={`Связь: ${session.netStatus.value}`}><span class={`dot ${session.netStatus.value}`} /></span>}
           <span class="spacer" />
-          {view.canGoBack && <button class="small" onClick={() => host({type: 'phase.back'})}>Назад</button>}
+          {view.deadline && (
+            <span class="row" style={{gap: 4}}>
+              <Timer deadline={view.deadline} />
+              <button class="ghost icon-btn small no-print" title="Добавить 2 минуты" onClick={() => { host({type: 'deadline.extend', minutes: 2}); toast('+2 минуты', 'info') }}>+2</button>
+            </span>
+          )}
+          {showsProgress && <Ring value={submitted} total={active.length} size={40} />}
+          {!single && <span title={`Связь: ${session.netStatus.value === 'online' ? 'отличная' : session.netStatus.value === 'degraded' ? 'слабая' : 'нет'}`}><span class={`dot ${session.netStatus.value}`} /></span>}
+          {view.canGoBack && <button class="ghost icon-btn no-print" title="Вернуться на шаг назад" aria-label="Назад" onClick={() => host({type: 'phase.back'})}>↶</button>}
+          {view.advanceBlock && view.phase !== 'summary' && <span class="block-hint no-print">{view.advanceBlock}</span>}
           {view.phase !== 'summary' && (
-            <button class="primary" disabled={!!view.advanceBlock} title={view.advanceBlock ?? ''} onClick={next}>
-              {view.phase === 'rate' || view.phase === 'rate2' ? 'Раскрыть результаты' : 'Дальше →'}
+            <button class="primary next-btn no-print" disabled={!!view.advanceBlock} onClick={next}>
+              {view.phase === 'rate' || view.phase === 'rate2' ? 'Раскрыть ✨' : 'Дальше →'}
             </button>
           )}
         </div>
-        <div class="inner" style={{paddingTop: 0}}><PhaseSteps view={view} /></div>
+        <div class="inner bar-progress"><PhaseSteps view={view} /></div>
       </div>
       <div class="wrap stack">
-        {view.advanceBlock && view.phase !== 'summary' && <div class="tiny muted">Чтобы идти дальше: {view.advanceBlock.toLowerCase()}</div>}
         <ErrorLine msg={err} />
         {!projector && (
-          <div class="tabs no-print">
-            <button class={tab === 'panel' ? 'on' : ''} onClick={() => setTab('panel')}>{single ? 'Сессия' : 'Пульт'}</button>
-            {!single && <button class={tab === 'me' ? 'on' : ''} onClick={() => setTab('me')}>Мой голос ({project.hostName})</button>}
-            {!single && <button class={tab === 'diag' ? 'on' : ''} onClick={() => setTab('diag')}>Связь</button>}
-            <span class="spacer" />
-            <button class="small ghost" onClick={() => setProjector(true)}>Большой экран</button>
+          <div class="row between no-print">
+            <div class="tabs">
+              <button class={tab === 'panel' ? 'on' : ''} onClick={() => setTab('panel')}>{single ? 'Сессия' : 'Команда'}</button>
+              {!single && <button class={tab === 'me' ? 'on' : ''} onClick={() => setTab('me')}>Мой голос{myTurn ? ' •' : ''}</button>}
+              {!single && <button class={tab === 'diag' ? 'on' : ''} onClick={() => setTab('diag')}>Связь</button>}
+            </div>
+            <button class="ghost small" onClick={() => setProjector(true)} title="Крупный шрифт для проектора">⛶ Большой экран</button>
           </div>
         )}
-        {projector && <button class="small no-print" onClick={() => setProjector(false)}>Выйти из режима большого экрана</button>}
-        {tab === 'panel' && (single
-          ? <SingleScreen view={view} stage={stage} host={host} asParticipant={asParticipant} project={project} />
-          : <HostPanel view={view} stage={stage} host={host} joinUrl={joinUrl} project={project} projector={projector} onNextStage={onNextStage} />)}
-        {tab === 'me' && !single && <ParticipantStage view={view} pid={hostPid} send={asParticipant(hostPid)} storeKey={`pi:me:${stage.id}:${hostPid}`} />}
-        {tab === 'diag' && transport && <Diagnostics transport={transport} />}
+        {projector && <button class="small ghost no-print" onClick={() => setProjector(false)}>Обычный режим</button>}
+        {myTurn && tab === 'panel' && (
+          <button class="note no-print" style={{justifyContent: 'flex-start', textAlign: 'left', border: 0, width: '100%', cursor: 'pointer', fontWeight: 600, borderRadius: 'var(--radius-sm)'}} onClick={() => setTab('me')}>
+            Вы тоже участник — ваш ход во вкладке «Мой голос» →
+          </button>
+        )}
+        <div class="phase-enter" key={`${view.phase}-${tab}`}>
+          {tab === 'panel' && (single
+            ? <SingleScreen view={view} stage={stage} host={host} asParticipant={asParticipant} project={project} />
+            : <HostPanel view={view} stage={stage} host={host} joinUrl={joinUrl} project={project} projector={projector} onNextStage={onNextStage} />)}
+          {tab === 'me' && !single && <ParticipantStage view={view} pid={hostPid} send={asParticipant(hostPid)} storeKey={`pi:me:${stage.id}:${hostPid}`} />}
+          {tab === 'diag' && transport && <Diagnostics transport={transport} />}
+        </div>
         {single && view.phase === 'summary' && <NextStageButton project={project} view={view} onNextStage={onNextStage} />}
       </div>
     </div>
@@ -406,16 +421,16 @@ function NextStageButton({project, view, onNextStage}: {project: StoredProject; 
   return <button class="primary no-print" onClick={() => onNextStage(project, text)}>Перейти к идеям для выбранной проблемы →</button>
 }
 
-function Progress({view, stage, phaseWord}: {view: PublicView; stage: Stage; phaseWord: string}) {
+function Progress({view, stage}: {view: PublicView; stage: Stage}) {
+  const active = stage.participants.filter(p => p.active)
+  const done = active.filter(p => view.progress[p.id]).length
   return (
-    <div class="card">
-      <h3>Кто {phaseWord}</h3>
-      <div class="row">
-        {stage.participants.filter(p => p.active).map(p => (
-          <span key={p.id} class={`chip ${view.progress[p.id] ? 'ok' : ''}`}>{view.progress[p.id] ? '✓' : '…'} {p.name}</span>
-        ))}
+    <div class="card stack">
+      <div class="row between">
+        <b>{done === active.length ? 'Все отправили 🎉' : `Готовы ${done} из ${active.length}`}</b>
+        <span class="tiny muted">видно, кто отправил, но не что</span>
       </div>
-      <div class="tiny muted" style={{marginTop: 6}}>Видно только, кто отправил, но не что именно.</div>
+      <Avatars people={active} doneIds={view.progress} />
     </div>
   )
 }
@@ -427,29 +442,38 @@ function HostPanel({view, stage, host, joinUrl, project, projector, onNextStage}
   switch (view.phase) {
     case 'lobby':
       return (
+        <div class="stack">
+        <PhaseIntro emoji="👋" title="Собираем команду">Покажите QR-код или отправьте ссылку в чат. Когда все появятся — жмите «Дальше».</PhaseIntro>
         <div class="grid" style={{gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))'}}>
           <div class="card stack center">
-            <h2>Отсканируйте, чтобы войти</h2>
+            <h2>Наведите камеру</h2>
             <div class="row" style={{justifyContent: 'center'}}><QR text={joinUrl} /></div>
             <CopyLink url={joinUrl} />
             <div class="tiny muted">Ключ шифрования — в части ссылки после «#». Отправляйте ссылку только своей команде.</div>
           </div>
           <div class="stack">
             <Participants stage={stage} host={host} />
-            {!projector && <div class="card"><h3>Настройки</h3><SettingsFields settings={stage.settings} onChange={patch => host({type: 'settings.update', patch})} /></div>}
+            {!projector && <details class="card more"><summary>Настройки сессии</summary><div style={{marginTop: 8}}><SettingsFields settings={stage.settings} onChange={patch => host({type: 'settings.update', patch})} /></div></details>}
           </div>
+        </div>
         </div>
       )
     case 'generate':
       return (
         <div class="stack">
-          <div class="note">Все молча пишут карточки на своих телефонах (вы — во вкладке «Мой голос»). Чужие карточки откроются на следующем шаге.</div>
-          <div class="card">
-            <h3>Сколько карточек у каждого</h3>
-            <div class="row">{stage.participants.filter(p => p.active).map(p => <span class={`chip ${view.cardCounts[p.id] ? 'ok' : ''}`} key={p.id}>{p.name}: {view.cardCounts[p.id] ?? 0}</span>)}</div>
+          <PhaseIntro emoji="🤫" title="Тихо пишем">Каждый сам, без обсуждения. Чужие карточки откроются на следующем шаге.</PhaseIntro>
+          <div class="card stack">
+            <b>Карточек написано: {Object.values(view.cardCounts).reduce((a, b) => a + b, 0)}</b>
+            <div class="avatars">
+              {stage.participants.filter(p => p.active).map(p => (
+                <span class="avatar-item" key={p.id}>
+                  <Avatar name={p.name} dim={!view.cardCounts[p.id]} />
+                  <span class="avatar-name">{p.name} · {view.cardCounts[p.id] ?? 0}</span>
+                </span>
+              ))}
+            </div>
           </div>
-          {!projector && <Participants stage={stage} host={host} compact />}
-          {!projector && <div class="card center"><div class="small muted">Опоздавшие могут войти по QR</div><div class="row" style={{justifyContent: 'center'}}><div style={{width: 160}}><QR text={joinUrl} /></div></div></div>}
+          {!projector && <details class="card more"><summary>Опоздавшие — QR для входа</summary><div class="row" style={{justifyContent: 'center', marginTop: 8}}><div style={{width: 180}}><QR text={joinUrl} /></div></div></details>}
         </div>
       )
     case 'merge':
@@ -459,13 +483,20 @@ function HostPanel({view, stage, host, joinUrl, project, projector, onNextStage}
     case 'calibrate':
       return <CalibratePanel view={view} stage={stage} host={host} />
     case 'shortlist':
-      return <Progress view={view} stage={stage} phaseWord="отметил лучшие" />
+      return (
+        <div class="stack">
+          <PhaseIntro emoji="🎯" title="Быстрый отбор">Карточек много — каждый отмечает лучшие. Дальше пройдут 5 финалистов.</PhaseIntro>
+          <Progress view={view} stage={stage} />
+        </div>
+      )
     case 'rate':
     case 'rate2':
       return (
         <div class="stack">
-          <div class="note">{view.phase === 'rate2' ? 'Второй раунд: переоцениваем только спорные карточки.' : 'Все оценивают вслепую. Результаты откроются, когда вы нажмёте «Раскрыть результаты».'}</div>
-          <Progress view={view} stage={stage} phaseWord="отправил оценки" />
+          {view.phase === 'rate2'
+            ? <PhaseIntro emoji="🔁" title="Второй раунд">После обсуждения переоцениваем только спорные карточки.</PhaseIntro>
+            : <PhaseIntro emoji="🙈" title="Оцениваем вслепую">Никто не видит чужих оценок. Когда все отправят — жмите «Раскрыть».</PhaseIntro>}
+          <Progress view={view} stage={stage} />
         </div>
       )
     case 'results':
@@ -494,21 +525,26 @@ function CopyLink({url}: {url: string}) {
 function Participants({stage, host, compact}: {stage: Stage; host: (a: Action) => string | null; compact?: boolean}) {
   const now = Date.now()
   return (
-    <div class="card">
-      <h3>Участники ({stage.participants.filter(p => p.active).length})</h3>
-      {stage.participants.length === 0 && <div class="muted small">Пока никого.</div>}
-      <div class="stack">
+    <div class="card stack">
+      <b>В комнате: {stage.participants.filter(p => p.active).length}</b>
+      {stage.participants.length === 0 && <div class="muted small">Пока никого — ждём первых.</div>}
+      <Avatars people={stage.participants.filter(p => p.active)} />
+      {!compact && stage.participants.length > 0 && (
+      <details class="more"><summary>Управление участниками</summary>
+      <div class="stack" style={{marginTop: 8}}>
         {stage.participants.map(p => (
           <div class="row between" key={p.id}>
             <span>
               <span class={`dot ${now - p.lastSeen < 60_000 ? 'online' : 'degraded'}`} /> {p.name} <span class="tiny muted">{p.alias}</span>
               {!p.active && <span class="chip" style={{marginLeft: 6}}>неактивен</span>}
             </span>
-            {!compact && <button class="small" onClick={() => host({type: 'participant.setActive', id: p.id, active: !p.active})}>{p.active ? 'Убрать' : 'Вернуть'}</button>}
+            {<button class="small" onClick={() => host({type: 'participant.setActive', id: p.id, active: !p.active})}>{p.active ? 'Убрать' : 'Вернуть'}</button>}
           </div>
         ))}
       </div>
       <div class="tiny muted" style={{marginTop: 6}}>«Убрать» — человек ушёл: его не ждём при подсчёте «все отправили».</div>
+      </details>
+      )}
     </div>
   )
 }
@@ -521,7 +557,7 @@ function MergePanel({view, host}: {view: PublicView; host: (a: Action) => string
   const merge = (into: string, from: string) => { host({type: 'merge', into, from}); setPick(null) }
   return (
     <div class="stack">
-      <div class="note">Перетащите карточку на похожую (или нажмите «Склеить с…»), чтобы объединить дубли. Склейку можно отменить до оценки.</div>
+      <PhaseIntro emoji="🧩" title="Склеиваем дубли">Перетащите карточку на похожую — или «Склеить с…». Отменить можно до оценки.</PhaseIntro>
       {view.mergeSuggestions.length > 0 && (
         <div class="card stack">
           <h3>Участники предлагают склеить</h3>
@@ -564,7 +600,7 @@ function CriteriaPanel({view, stage, host}: {view: PublicView; stage: Stage; hos
   const name = (pid?: string) => stage.participants.find(p => p.id === pid)?.name
   return (
     <div class="stack">
-      <div class="note">Утвердите 3–4 критерия. У каждого должны быть описания для оценок 1 и 5 — иначе все понимают шкалу по-разному. Предложения участников приходят сюда.</div>
+      <PhaseIntro emoji="📏" title="По чему оцениваем">Утвердите 3–4 критерия. Предложения команды появляются здесь.</PhaseIntro>
       {hints.map(h => <div class="hint" key={h}>💡 {h}</div>)}
       {view.criteria.map(c => <CriterionEditor key={c.id} c={c} host={host} proposer={name(c.proposedBy)} />)}
       <div class="card">
@@ -625,9 +661,9 @@ function CriterionEditor({c, host, proposer}: {c: Criterion; host: (a: Action) =
 function CalibratePanel({view, stage, host}: {view: PublicView; stage: Stage; host: (a: Action) => string | null}) {
   return (
     <div class="stack">
-      <div class="note">Все оценивают одну пробную карточку. Она не идёт в итог — проверяем, одинаково ли понимаем шкалы.</div>
+      <PhaseIntro emoji="🎚️" title="Сверяем шкалы">Все оценивают одну пробную карточку — она не идёт в итог.</PhaseIntro>
       {view.calibrationCard && <div class="card"><CardBody type={view.type} card={view.calibrationCard} full /></div>}
-      {!view.calibration && <Progress view={view} stage={stage} phaseWord="оценил пробную карточку" />}
+      {!view.calibration && <Progress view={view} stage={stage} />}
       {!view.calibration && <button onClick={() => host({type: 'calib.reveal'})}>Показать разброс сейчас</button>}
       {view.calibration && view.calibration.map(r => {
         const c = view.criteria.find(x => x.id === r.criterionId)
@@ -667,7 +703,7 @@ function DecidePanel({view, host}: {view: PublicView; host: (a: Action) => strin
   const leader = res.cards[0]?.cardId
   return (
     <div class="stack">
-      <div class="note">Решение принимает команда. Отметьте выбранное (можно несколько), отложенное — с причиной, чтобы вернуться позже.</div>
+      <PhaseIntro emoji="🤝" title="Принимаем решение">Отметьте выбранное. Отложенному — причину, чтобы вернуться позже.</PhaseIntro>
       {res.cards.map(r => {
         const card = view.cards.find(c => c.id === r.cardId)
         if (!card) return null

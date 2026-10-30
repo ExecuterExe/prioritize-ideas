@@ -27,18 +27,115 @@ export function Timer({deadline, offset = 0}: {deadline?: number; offset?: numbe
   const left = Math.round((deadline - (now + offset)) / 1000)
   const abs = Math.abs(left)
   const text = `${left < 0 ? '−' : ''}${Math.floor(abs / 60)}:${String(abs % 60).padStart(2, '0')}`
-  return <span class={`timer ${left < 0 ? 'over' : left <= 60 ? 'low' : ''}`} title="Осталось времени на шаг">⏱ {text}</span>
+  return <span class={`timer ${left < 0 ? 'over' : left <= 60 ? 'low' : ''}`} title="Осталось времени на шаг">{text}</span>
 }
 
 const STEP_ORDER: Phase[] = ['lobby', 'generate', 'merge', 'criteria', 'calibrate', 'shortlist', 'rate', 'results', 'decide', 'summary']
 
+// Тонкая линия прогресса вместо ряда из десяти «таблеток»
 export function PhaseSteps({view}: {view: PublicView}) {
   const flow = STEP_ORDER.filter(p => view.flow.includes(p))
   const cur = view.phase === 'rate2' ? 'results' : view.phase
   const idx = flow.indexOf(cur)
   return (
-    <div class="steps" aria-label="Шаги">
-      {flow.map((p, i) => <span key={p} class={i === idx ? 'on' : i < idx ? 'done' : ''}>{PHASE_LABEL[p]}</span>)}
+    <div class="progress" aria-label={`Шаг ${idx + 1} из ${flow.length}`} title={flow.map((p, i) => `${i + 1}. ${PHASE_LABEL[p]}`).join(' · ')}>
+      {flow.map((p, i) => <i key={p} class={i < idx ? 'done' : i === idx ? 'on' : ''} />)}
+    </div>
+  )
+}
+
+export function stepLabel(view: PublicView): string {
+  const flow = STEP_ORDER.filter(p => view.flow.includes(p))
+  const cur = view.phase === 'rate2' ? 'results' : view.phase
+  return `Шаг ${flow.indexOf(cur) + 1} из ${flow.length}`
+}
+
+// Короткое «что делать сейчас» в начале каждого шага
+export function PhaseIntro({title, children, emoji}: {title: string; emoji?: string; children?: preact.ComponentChildren}) {
+  return (
+    <div class="intro">
+      {emoji && <div class="intro-emoji" aria-hidden="true">{emoji}</div>}
+      <div>
+        <h2>{title}</h2>
+        {children && <p class="muted">{children}</p>}
+      </div>
+    </div>
+  )
+}
+
+const AVATAR_HUES = [262, 280, 245, 160, 170, 300, 225, 145]
+
+export function Avatar({name, done, size = 36, dim}: {name: string; done?: boolean; size?: number; dim?: boolean}) {
+  let h = 0
+  for (const ch of name) h = (h * 31 + ch.charCodeAt(0)) >>> 0
+  const hue = AVATAR_HUES[h % AVATAR_HUES.length]
+  const letters = name.trim().split(/\s+/).map(w => w[0]).join('').slice(0, 2).toUpperCase() || '?'
+  return (
+    <span class={`avatar ${done ? 'done' : ''} ${dim ? 'dim' : ''}`} title={name}
+      style={{'--h': hue, width: `${size}px`, height: `${size}px`, fontSize: `${size * 0.38}px`} as preact.JSX.CSSProperties}>
+      {letters}
+      {done && <span class="avatar-check">✓</span>}
+    </span>
+  )
+}
+
+export function Avatars({people, doneIds, showNames = true}: {people: {id: string; name: string}[]; doneIds?: Set<string> | Record<string, boolean>; showNames?: boolean}) {
+  const isDone = (id: string) => doneIds instanceof Set ? doneIds.has(id) : !!doneIds?.[id]
+  return (
+    <div class="avatars">
+      {people.map(p => (
+        <span class="avatar-item" key={p.id}>
+          <Avatar name={p.name} done={doneIds ? isDone(p.id) : undefined} dim={doneIds ? !isDone(p.id) : false} />
+          {showNames && <span class="avatar-name">{p.name}</span>}
+        </span>
+      ))}
+    </div>
+  )
+}
+
+export function Ring({value, total, size = 44}: {value: number; total: number; size?: number}) {
+  const r = (size - 6) / 2, c = 2 * Math.PI * r
+  const frac = total ? Math.min(1, value / total) : 0
+  return (
+    <span class="ring" style={{width: `${size}px`, height: `${size}px`}} title={`${value} из ${total}`}>
+      <svg viewBox={`0 0 ${size} ${size}`}>
+        <circle cx={size / 2} cy={size / 2} r={r} class="ring-bg" />
+        <circle cx={size / 2} cy={size / 2} r={r} class="ring-fg" stroke-dasharray={`${c * frac} ${c}`} transform={`rotate(-90 ${size / 2} ${size / 2})`} />
+      </svg>
+      <b>{value}/{total}</b>
+    </span>
+  )
+}
+
+// Число «набегает» от 0 до значения
+export function CountUp({value, ms = 900}: {value: number; ms?: number}) {
+  const [v, setV] = useState(0)
+  useEffect(() => {
+    if (typeof matchMedia !== 'undefined' && matchMedia('(prefers-reduced-motion: reduce)').matches) { setV(value); return }
+    let raf = 0
+    const t0 = performance.now()
+    const tick = (t: number) => {
+      const k = Math.min(1, (t - t0) / ms)
+      setV(Math.round(value * (1 - Math.pow(1 - k, 3))))
+      if (k < 1) raf = requestAnimationFrame(tick)
+    }
+    raf = requestAnimationFrame(tick)
+    return () => cancelAnimationFrame(raf)
+  }, [value])
+  return <>{v}</>
+}
+
+// Экран «готово, ждём остальных»
+export function Waiting({view, title, onEdit, editLabel = 'Изменить ответы'}: {view: PublicView; title: string; onEdit?: () => void; editLabel?: string}) {
+  const active = view.participants.filter(p => p.active)
+  const done = active.filter(p => view.progress[p.id]).length
+  return (
+    <div class="card waiting">
+      <div class="waiting-check" aria-hidden="true">✓</div>
+      <h2>{title}</h2>
+      <p class="muted">{done < active.length ? `Ждём остальных — готовы ${done} из ${active.length}` : 'Все готовы — организатор вот-вот откроет следующий шаг'}</p>
+      <Avatars people={active} doneIds={view.progress} />
+      {onEdit && <button class="ghost small" onClick={onEdit}>{editLabel}</button>}
     </div>
   )
 }
@@ -91,6 +188,17 @@ export function Anchors({c}: {c: Criterion}) {
       <div>5 — {c.anchors[5]}</div>
     </div>
   )
+}
+
+// Вместо трёх колонок описаний — одна строка: что значит выбранная оценка
+export function AnchorLine({c, value}: {c: Criterion; value: number | null | undefined}) {
+  let text: string
+  if (value === null) text = 'Не могу оценить — эта оценка не войдёт в расчёт'
+  else if (value === 1 || value === 3 || value === 5) text = c.anchors[value] ? `${value} — ${c.anchors[value]}` : ''
+  else if (value === 2) text = `Между «${c.anchors[1]}» и «${c.anchors[3] ?? c.anchors[5]}»`
+  else if (value === 4) text = `Между «${c.anchors[3] ?? c.anchors[1]}» и «${c.anchors[5]}»`
+  else text = `1 — ${c.anchors[1]} · 5 — ${c.anchors[5]}`
+  return <div class={`anchor-line ${value != null ? `sc${value} picked` : ''}`}>{text}</div>
 }
 
 export function Dist({values}: {values: number[]}) {
