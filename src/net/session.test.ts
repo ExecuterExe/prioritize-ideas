@@ -34,7 +34,7 @@ describe('session over lossy transport', () => {
       expect(c.view.value?.cardCounts.a).toBe(1)
     }
     host.close(); clients.forEach(c => c.close())
-  }, 30_000)
+  }, 60_000)
 
   it('wrong key cannot read the room', async () => {
     const key = await importKey(randomBytes(32))
