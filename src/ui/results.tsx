@@ -40,7 +40,7 @@ export function ResultsView({view, send, canArgue}: {view: PublicView; send?: Se
             <div class="row between" style={{alignItems: 'flex-start'}}>
               <div style={{flex: 1, minWidth: 200}}>
                 <div class="row" style={{gap: 6}}>
-                  <span class="chip">#{r.rank}</span>
+                  <span class={`rank ${r.rank === 1 ? 'top' : ''}`}>{r.rank}</span>
                   {decision?.status === 'chosen' && <span class="chip ok">✅ Выбрано</span>}
                   {decision?.status === 'deferred' && <span class="chip warn">⏸ Отложено</span>}
                   {decision?.status === 'rejected' && <span class="chip bad">✖ Отклонено</span>}

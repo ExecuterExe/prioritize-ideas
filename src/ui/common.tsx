@@ -72,9 +72,10 @@ export function ScoreButtons({value, onChange, disabled}: {value: number | null 
     <div>
       <div class="scores">
         {([1, 2, 3, 4, 5] as const).map(v => (
-          <button key={v} type="button" disabled={disabled} class={value === v ? 'primary' : ''} onClick={() => onChange(v)} aria-pressed={value === v}>{v}</button>
+          <button key={v} type="button" disabled={disabled} class={`sc${v} ${value === v ? 'on' : ''}`} onClick={() => onChange(v)} aria-pressed={value === v}>{v}</button>
         ))}
       </div>
+      <div class="scale-bar" />
       <button type="button" disabled={disabled} class={`small ghost ${value === null ? 'selected' : ''}`} style={{marginTop: 4}} onClick={() => onChange(null)}>
         Не могу оценить
       </button>
@@ -97,7 +98,7 @@ export function Dist({values}: {values: number[]}) {
   return (
     <div>
       <div class="dist">
-        {counts.map((n, i) => <div class="col" key={i}>{Array.from({length: n}, (_, j) => <span class="pip" key={j} />)}</div>)}
+        {counts.map((n, i) => <div class="col" key={i}>{Array.from({length: n}, (_, j) => <span class={`pip sc${i + 1}`} key={j} />)}</div>)}
       </div>
       <div class="dist-axis">{[1, 2, 3, 4, 5].map(v => <span key={v}>{v}</span>)}</div>
     </div>
@@ -133,6 +134,13 @@ export function Matrix({view, xId, yId}: {view: PublicView; xId: string; yId: st
   return (
     <div class="matrix">
       <svg viewBox={`0 0 ${W} ${H}`} role="img" aria-label={`Матрица ${cx.name} × ${cy.name}`}>
+        <defs>
+          <linearGradient id="ptgrad" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0%" stop-color="var(--s1)" />
+            <stop offset="100%" stop-color="var(--s5)" />
+          </linearGradient>
+        </defs>
+        <rect class="q-good" x={W / 2} y={P} width={W / 2 - P} height={H / 2 - P} />
         <rect x={P} y={P} width={W - 2 * P} height={H - 2 * P} fill="none" />
         <line x1={W / 2} y1={P} x2={W / 2} y2={H - P} stroke-dasharray="4 4" />
         <line x1={P} y1={H / 2} x2={W - P} y2={H / 2} stroke-dasharray="4 4" />
@@ -140,12 +148,12 @@ export function Matrix({view, xId, yId}: {view: PublicView; xId: string; yId: st
         <text x={12} y={H / 2} text-anchor="middle" transform={`rotate(-90 12 ${H / 2})`}>{cy.name} →</text>
         {pts.map(p => (
           <g key={p.rank}>
-            <circle class="pt" cx={sx(p.x)} cy={sy(p.y)} r={11} />
+            <circle class="pt" cx={sx(p.x)} cy={sy(p.y)} r={13} />
             <text class="pt-label" x={sx(p.x)} y={sy(p.y) + 4} text-anchor="middle" style={{fill: 'var(--accent-ink)'}}>{p.rank}</text>
           </g>
         ))}
       </svg>
-      <div class="tiny muted">Номер точки — место в рейтинге. Оценки уже с учётом направления критерия.</div>
+      <div class="tiny muted">Номер точки — место в рейтинге. Зелёная четверть — сильные по обеим осям. Оценки уже с учётом направления критерия.</div>
     </div>
   )
 }

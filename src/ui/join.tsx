@@ -8,6 +8,7 @@ import {ClientSession} from '../net/session'
 import {lsGet, lsSet} from '../store/db'
 import {ErrorLine, PhaseSteps, Timer} from './common'
 import {ParticipantStage} from './participant'
+import {Brand} from './host'
 
 export function JoinApp({roomId, secret}: {roomId: string; secret: string}) {
   const pidKey = `pi:pid:${roomId}`
@@ -46,7 +47,11 @@ export function JoinApp({roomId, secret}: {roomId: string; secret: string}) {
   if (!joined) {
     return (
       <div class="narrow stack">
-        <h1>Вход в комнату</h1>
+        <div class="hero">
+          <Brand />
+          <h1>Вход <span class="grad-text">в комнату</span></h1>
+          <p class="muted">Здесь вы молча предложите свои варианты и оцените чужие — вслепую.</p>
+        </div>
         <div class="card stack">
           <label class="field"><span>Как вас зовут?</span>
             <input type="text" value={name} maxLength={40} autoFocus onInput={e => setName((e.target as HTMLInputElement).value)} />

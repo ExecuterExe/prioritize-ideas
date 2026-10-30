@@ -16,6 +16,17 @@ declare const __SINGLE__: boolean
 
 const OPEN_KEY = 'pi:host:open'
 
+export function Brand() {
+  return (
+    <span class="brand">
+      <span class="brand-mark">
+        <svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.6" stroke-linecap="round"><path d="M5 19v-5M12 19V7M19 19v-9" /></svg>
+      </span>
+      Приоритизация идей
+    </span>
+  )
+}
+
 const BLIND_PHASES = new Set(['generate', 'calibrate', 'shortlist', 'rate', 'rate2'])
 
 export function HostApp() {
@@ -75,9 +86,15 @@ function Home({projects, onOpen, onNew, onNewStage, onChanged}: {
   }
   return (
     <div class="narrow stack">
-      <div>
-        <h1>Приоритизация идей</h1>
-        <p class="muted">Команда предлагает проблемы или идеи, договаривается о критериях, оценивает вслепую — и видит, где согласна, а где спорит.</p>
+      <div class="hero">
+        <Brand />
+        <h1>Выбираем проблему <span class="grad-text">командой, а не громким голосом</span></h1>
+        <p class="muted">Каждый предлагает варианты молча, вы договариваетесь о критериях и оцениваете вслепую — а сервис показывает, где команда согласна, а где спорит.</p>
+        <div class="features">
+          <div class="feature"><i>🤫</i><div><b>Слепая оценка</b>Чужие оценки скрыты до раскрытия</div></div>
+          <div class="feature"><i>⚡</i><div><b>Карта споров</b>Видно, где мнения расходятся</div></div>
+          <div class="feature"><i>🧭</i><div><b>Lean Canvas</b>Итог — сразу в канвас</div></div>
+        </div>
       </div>
       <div class="row">
         <button class="primary" onClick={onNew}>Новый проект</button>
@@ -88,13 +105,13 @@ function Home({projects, onOpen, onNew, onNewStage, onChanged}: {
       {projects === null && <div class="muted">Загрузка…</div>}
       {projects?.length === 0 && <div class="card muted">Проектов пока нет.</div>}
       {projects?.map(p => (
-        <div class="card stack" key={p.id}>
+        <div class="card stack project-card" key={p.id}>
           <div class="row between">
             <h2 style={{margin: 0}}>{p.title}</h2>
             <span class="tiny muted">{new Date(p.updatedAt).toLocaleString('ru-RU')}</span>
           </div>
           {p.stages.map(s => (
-            <div class="row between" key={s.id}>
+            <div class="row between stage-row" key={s.id}>
               <div>
                 <b>{s.type === 'problem' ? 'Проблема' : 'Идея'}</b>: {s.title}
                 <span class="chip" style={{marginLeft: 6}}>{PHASE_LABEL[s.phase]}</span>
