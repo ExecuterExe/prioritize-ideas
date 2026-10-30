@@ -25,7 +25,9 @@ describe('session over lossy transport', () => {
     const bad = await clients[1].send({type: 'phase.next'})
     expect(bad).toContain('организатор')
     // Ждём, пока при потерях до всех дойдёт актуальное состояние (повтор рассылки, синхронизация)
-    for (let t = 0; t < 40 && !clients.every(c => c.view.value?.phase === 'generate'); t++) await wait(250)
+    // (до 20 с: в худшем случае состояние приходит с плановым обновлением раз в 12 с)
+    const synced = () => clients.every(c => c.view.value?.version === host.stage.value.version)
+    for (let t = 0; t < 80 && !synced(); t++) await wait(250)
     for (const c of clients) {
       expect(c.view.value?.phase).toBe('generate')
       expect(c.view.value?.cards).toHaveLength(0)
