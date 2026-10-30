@@ -1,0 +1,94 @@
+// Приложение участника: вход по ссылке из QR-кода (#j=<roomId>.<key>).
+import {useEffect, useState} from 'preact/hooks'
+import {uid} from '../core/engine'
+import {PHASE_LABEL} from '../core/types'
+import {fromB64u, importKey, sha256hex} from '../net/crypto'
+import {NostrTransport} from '../net/nostr'
+import {ClientSession} from '../net/session'
+import {lsGet, lsSet} from '../store/db'
+import {ErrorLine, PhaseSteps, Timer} from './common'
+import {ParticipantStage} from './participant'
+
+export function JoinApp({roomId, secret}: {roomId: string; secret: string}) {
+  const pidKey = `pi:pid:${roomId}`
+  const nameKey = 'pi:name'
+  const [pid] = useState(() => {
+    const p = lsGet<string>(pidKey, '') || uid()
+    lsSet(pidKey, p)
+    return p
+  })
+  const [name, setName] = useState(() => lsGet<string>(nameKey, ''))
+  const [joined, setJoined] = useState(() => lsGet<boolean>(`pi:joined:${roomId}`, false))
+  const [session, setSession] = useState<ClientSession | null>(null)
+  const [err, setErr] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!joined) return
+    let s: ClientSession | null = null
+    let cancelled = false
+    ;(async () => {
+      try {
+        const k = await importKey(fromB64u(secret))
+        const tag = (await sha256hex(`pi:${roomId}`)).slice(0, 16)
+        s = new ClientSession(pid, new NostrTransport(tag), k)
+        if (cancelled) return
+        setSession(s)
+        const r = await s.start(name)
+        if (r) setErr(r)
+      } catch (e) {
+        setErr('Ссылка повреждена или браузер слишком старый. Попробуйте открыть её в Chrome или Safari.')
+        console.error(e)
+      }
+    })()
+    return () => { cancelled = true; s?.close() }
+  }, [joined])
+
+  if (!joined) {
+    return (
+      <div class="narrow stack">
+        <h1>Вход в комнату</h1>
+        <div class="card stack">
+          <label class="field"><span>Как вас зовут?</span>
+            <input type="text" value={name} maxLength={40} autoFocus onInput={e => setName((e.target as HTMLInputElement).value)} />
+          </label>
+          <div class="tiny muted">Имя видят участники команды. Авторство карточек и ваши оценки скрыты.</div>
+          <button class="primary" disabled={!name.trim()} onClick={() => { lsSet(nameKey, name.trim()); lsSet(`pi:joined:${roomId}`, true); setJoined(true) }}>Войти</button>
+        </div>
+      </div>
+    )
+  }
+
+  const view = session?.view.value
+  const net = session?.netStatus.value ?? 'offline'
+  // Связь с организатором восстановилась — старая ошибка «нет связи» больше не актуальна
+  const hostSeen = session?.hostSeen.value ?? 0
+  useEffect(() => { if (hostSeen) setErr(null) }, [hostSeen])
+  const stale = session && Date.now() - session.hostSeen.value > 25_000
+  return (
+    <div>
+      <div class="topbar">
+        <div class="inner">
+          <div style={{minWidth: 0, flex: 1}}>
+            <div class="tiny muted">{view ? `${view.title}` : 'Подключение…'}</div>
+            <div class="phase-title">{view ? PHASE_LABEL[view.phase] : 'Ищем организатора…'}</div>
+          </div>
+          {view && <Timer deadline={view.deadline} offset={session!.offset} />}
+          <span title="Связь"><span class={`dot ${stale ? 'degraded' : net}`} /></span>
+        </div>
+        {view && <div class="inner" style={{paddingTop: 0}}><PhaseSteps view={view} /></div>}
+      </div>
+      <div class="narrow stack">
+        <ErrorLine msg={err} />
+        {session && session.pendingCount.value > 0 && <div class="tiny muted">Отправляем… ({session.pendingCount.value})</div>}
+        {stale && view && <div class="hint">Связь с организатором прервалась — переподключаемся. Ваши черновики сохранены на телефоне.</div>}
+        {!view && (
+          <div class="card stack">
+            <div>Подключаемся к комнате…</div>
+            <div class="small muted">Если это длится больше 20 секунд: проверьте, что ноутбук организатора открыт на экране сессии и у обоих есть интернет.</div>
+          </div>
+        )}
+        {view && session && <ParticipantStage view={view} pid={pid} send={a => session.send(a)} storeKey={`pi:me:${view.stageId}:${pid}`} />}
+      </div>
+    </div>
+  )
+}

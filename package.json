@@ -1,0 +1,28 @@
+{
+  "name": "prioritize-ideas",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "build:single": "vite build --mode single",
+    "preview": "vite preview",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit",
+    "probe": "node scripts/probe-relays.mjs"
+  },
+  "dependencies": {
+    "@preact/signals": "2.11.3",
+    "idb-keyval": "6.3.0",
+    "nostr-tools": "2.25.2",
+    "preact": "10.29.8",
+    "qrcode-generator": "2.0.4"
+  },
+  "devDependencies": {
+    "typescript": "7.0.2",
+    "vite": "8.3.4",
+    "vite-plugin-singlefile": "2.3.3",
+    "vitest": "4.1.12"
+  }
+}
