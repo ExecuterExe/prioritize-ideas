@@ -11,6 +11,7 @@ import {GenealogyTree, originLabel} from './evolve'
 import {RISK_STATUS_LABEL, riskRows} from '../core/risk'
 import {ScenariosPanel, scenariosMarkdown} from './scenarios'
 import {BoardPanel, boardMarkdown} from './board'
+import {planForChat} from './tasks'
 import type {Action} from '../core/engine'
 
 type Send = (a: Action) => Promise<string | null>
@@ -223,6 +224,8 @@ export function buildMarkdown(view: PublicView, projectTitle: string): string {
   if (sc) L.push(sc)
   const bm = boardMarkdown(view)
   if (bm) L.push(bm)
+  // Первые две строки текста для чата — заголовок и пустая строка, в отчёте у раздела свой заголовок
+  if (view.tasks.length || view.experiments.length) L.push('## Кто что делает', '', ...planForChat(view, projectTitle).split('\n').slice(2), '')
   const items = complianceItems(view.passport)
   if (items.length && chosen.length) {
     L.push('## Соответствие заданию', '')

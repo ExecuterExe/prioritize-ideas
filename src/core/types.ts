@@ -7,6 +7,7 @@ import type {ParentLink} from './evolve'
 import type {Journey} from './journey'
 import type {Scenario} from './scenario'
 import type {Board} from './board'
+import type {Task} from './tasks'
 
 // id шаблона этапа: 'problem', 'idea', 'hypothesis' или свой
 export type StageType = string
@@ -147,6 +148,7 @@ export interface Stage {
   journey?: Journey
   scenarios?: Scenario[]
   board?: Board
+  tasks?: Task[]
   version: number
   createdAt: number
 }

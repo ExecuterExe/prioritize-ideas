@@ -13,6 +13,7 @@ import {deleteProject, downloadFile, listProjects, loadProject, lsGet, lsSet, sa
 import {Avatar, Avatars, CardBody, ErrorLine, PhaseIntro, PhaseSteps, QR, Ring, Timer, phaseName, plural, stepLabel} from './common'
 import {JourneyHost, JourneySummary, journeyMarkdown} from './journey'
 import {BoardPanel} from './board'
+import {TasksPanel, buildPlan} from './tasks'
 import {barrierToProblem} from '../core/journey'
 import {ParticipantStage} from './participant'
 import {ResultsView, SummaryView} from './results'
@@ -236,7 +237,7 @@ function NewStage({init, onCancel, onCreated}: {
     }
     const s = createStage({
       projectId: project.id, template: tpl, now, settings, passport: project.passport,
-      assumptions: project.assumptions, experiments: project.experiments,
+      assumptions: project.assumptions, experiments: project.experiments, tasks: project.tasks,
       title: title.trim() || tpl.name,
       sourceProblem: sourceProblem.trim() || undefined,
       sourceFields: src?.card.fields,
@@ -432,7 +433,8 @@ function StageScreen({projectId, stageId, onExit, onNextStage}: {projectId: stri
         // Паспорт и реестры живут в проекте и переходят в следующие этапы
         projectRef.current = {
           ...withStage(projectRef.current!, s), passport: s.passport ?? projectRef.current!.passport,
-          assumptions: s.assumptions ?? projectRef.current!.assumptions, experiments: s.experiments ?? projectRef.current!.experiments
+          assumptions: s.assumptions ?? projectRef.current!.assumptions, experiments: s.experiments ?? projectRef.current!.experiments,
+          tasks: s.tasks ?? projectRef.current!.tasks
         }
         clearTimeout(saveTimer.current)
         saveTimer.current = setTimeout(() => { void saveProject(projectRef.current!); setProject(projectRef.current) }, 300)
@@ -468,7 +470,7 @@ function StageScreen({projectId, stageId, onExit, onNextStage}: {projectId: stri
   return <StageUI project={project} session={session} transport={transport} joinUrl={joinUrl} onExit={onExit} onNextStage={onNextStage} />
 }
 
-type Tab = 'panel' | 'me' | 'assume' | 'diag'
+type Tab = 'panel' | 'me' | 'assume' | 'tasks' | 'diag'
 
 function StageUI({project, session, transport, joinUrl, onExit, onNextStage}: {
   project: StoredProject; session: HostSession; transport: NostrTransport | null; joinUrl: string
@@ -500,6 +502,7 @@ function StageUI({project, session, transport, joinUrl, onExit, onNextStage}: {
     host({type: 'phase.next'})
   }
 
+  const openTasks = buildPlan(view).items.filter(i => !i.done).length
   const myTurn = !single && BLIND_PHASES.has(view.phase) && (view.phase === 'generate' ? !view.cardCounts[hostPid] : !view.progress[hostPid])
 
   return (
@@ -541,6 +544,7 @@ function StageUI({project, session, transport, joinUrl, onExit, onNextStage}: {
               <button class={tab === 'panel' ? 'on' : ''} onClick={() => setTab('panel')}>{single ? 'Сессия' : 'Команда'}</button>
               {!single && <button class={tab === 'me' ? 'on' : ''} onClick={() => setTab('me')}>Мой голос{myTurn ? ' •' : ''}</button>}
               <button class={tab === 'assume' ? 'on' : ''} onClick={() => setTab('assume')}>🎯 Предположения{view.assumptions.length ? ` (${view.assumptions.length})` : ''}{view.round?.open ? ' •' : ''}</button>
+              <button class={tab === 'tasks' ? 'on' : ''} onClick={() => setTab('tasks')}>📋 Задачи{openTasks ? ` (${openTasks})` : ''}</button>
               {!single && <button class={tab === 'diag' ? 'on' : ''} onClick={() => setTab('diag')}>Связь</button>}
             </div>
             <button class="ghost small" onClick={() => setProjector(true)} title="Крупный шрифт для проектора">⛶ Большой экран</button>
@@ -558,6 +562,7 @@ function StageUI({project, session, transport, joinUrl, onExit, onNextStage}: {
             : <HostPanel view={view} stage={stage} host={host} joinUrl={joinUrl} project={project} projector={projector} onNextStage={onNextStage} />)}
           {tab === 'me' && !single && <ParticipantStage view={view} pid={hostPid} send={asParticipant(hostPid)} storeKey={`pi:me:${stage.id}:${hostPid}`} assignKey={keyOf(stage, hostPid)} />}
           {tab === 'diag' && transport && <Diagnostics transport={transport} />}
+          {tab === 'tasks' && <TasksPanel view={view} send={asParticipant(hostPid)} pid={hostPid} isHost title={project.title} />}
           {tab === 'assume' && <AssumptionsPanel view={view} send={asParticipant(hostPid)} pid={hostPid} isHost single={single} />}
         </div>
       </div>
@@ -926,6 +931,7 @@ function DecidePanel({view, host}: {view: PublicView; host: (a: Action) => strin
                 onBlur={() => host({type: 'decision.set', cardId: r.cardId, status: d.status, reason})} />
             )}
             {needReason && !reason.trim() && <div class="hint">{isRisk ? 'Запишите меру — без неё риск так и останется риском.' : 'Запишите причину — это поможет при защите и при возврате к варианту.'}</div>}
+            {isRisk && d?.status === 'chosen' && <MitigationToTask view={view} cardId={r.cardId} host={host} />}
             {isRisk && d?.status === 'chosen' && <RiskToAssumption view={view} cardId={r.cardId} host={host} />}
             {!isRisk && d?.status === 'chosen' && <ThreatNote view={view} cardId={r.cardId} />}
             {!isRisk && d?.status === 'chosen' && <ComplianceCheck p={view.passport} marks={view.compliance[r.cardId]}
@@ -938,6 +944,19 @@ function DecidePanel({view, host}: {view: PublicView; host: (a: Action) => strin
 }
 
 // Опасный сценарий → скрытое предположение «этого не случится» → эксперимент
+function MitigationToTask({view, cardId, host}: {view: PublicView; cardId: string; host: (a: Action) => string | null}) {
+  const reason = view.decisions.find(d => d.cardId === cardId)?.reason?.trim()
+  if (!reason) return null
+  const title = `Мера против риска: ${reason}`.slice(0, 200)
+  if (view.tasks.some(t => t.title === title)) return <div class="tiny" style={{color: 'var(--ok)', fontWeight: 700}}>📌 Мера в задачах — назначьте ответственного во вкладке «Задачи»</div>
+  return (
+    <button class="small ghost" style={{alignSelf: 'flex-start'}} onClick={() => {
+      const r = host({type: 'task.add', id: uid(), title, source: 'risk'})
+      toast(r ?? 'Мера добавлена в задачи', r ? 'error' : 'ok')
+    }}>📌 Добавить меру в задачи</button>
+  )
+}
+
 function RiskToAssumption({view, cardId, host}: {view: PublicView; cardId: string; host: (a: Action) => string | null}) {
   const card = view.cards.find(c => c.id === cardId)
   if (!card) return null

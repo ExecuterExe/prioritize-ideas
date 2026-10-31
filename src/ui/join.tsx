@@ -11,6 +11,7 @@ import {Brand} from './host'
 import {PassportButton} from './passport'
 import {hashKey} from '../core/evolve'
 import {AssumptionsPanel} from './assumptions'
+import {TasksPanel} from './tasks'
 import {createPortal} from 'preact/compat'
 
 export function JoinApp({roomId, secret}: {roomId: string; secret: string}) {
@@ -32,6 +33,7 @@ export function JoinApp({roomId, secret}: {roomId: string; secret: string}) {
   const [session, setSession] = useState<ClientSession | null>(null)
   const [err, setErr] = useState<string | null>(null)
   const [assumeOpen, setAssumeOpen] = useState(false)
+  const [tasksOpen, setTasksOpen] = useState(false)
 
   useEffect(() => {
     if (!joined) return
@@ -89,6 +91,7 @@ export function JoinApp({roomId, secret}: {roomId: string; secret: string}) {
             <div class="phase-title">{view ? phaseName(view) : 'Ищем организатора…'}</div>
           </div>
           {view && <PassportButton p={view.passport} />}
+          {view && <button class="ghost icon-btn small" title="Кто что делает" aria-label="Задачи" onClick={() => setTasksOpen(true)}>✅</button>}
           {view && <button class="ghost icon-btn small" title="Предположения" aria-label="Предположения" onClick={() => setAssumeOpen(true)}>🎯</button>}
           {view && <Timer deadline={view.deadline} offset={session!.offset} />}
           <span title="Связь"><span class={`dot ${stale ? 'degraded' : net}`} /></span>
@@ -107,6 +110,15 @@ export function JoinApp({roomId, secret}: {roomId: string; secret: string}) {
         )}
         {view?.round?.open && !view.round.submitted.includes(pid) && (
           <button class="note" style={{justifyContent: 'flex-start', border: 0, width: '100%', fontWeight: 700, borderRadius: 'var(--radius-sm)'}} onClick={() => setAssumeOpen(true)}>🙈 Организатор просит оценить предположения — открыть →</button>
+        )}
+        {tasksOpen && view && session && createPortal(
+          <div class="sheet-backdrop" onClick={() => setTasksOpen(false)}>
+            <div class="sheet wide" role="dialog" aria-label="Кто что делает" onClick={e => e.stopPropagation()}>
+              <div class="row between"><h2 style={{margin: 0}}>✅ Задачи</h2><button class="ghost icon-btn" aria-label="Закрыть" onClick={() => setTasksOpen(false)}>✕</button></div>
+              <TasksPanel view={view} send={a => session.send(a)} pid={pid} isHost={false} title={view.title} />
+            </div>
+          </div>,
+          document.body
         )}
         {assumeOpen && view && session && createPortal(
           <div class="sheet-backdrop" onClick={() => setAssumeOpen(false)}>

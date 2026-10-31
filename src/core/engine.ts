@@ -7,6 +7,7 @@ import {fromLibrary} from './library'
 import {builtinTemplate, cardTitle, validateCard, type FieldValue, type StageTemplate} from './template'
 import type {ComplianceValue, Passport} from './passport'
 import {EVOLVE_LIMIT, assignEvolve, hashKey, type ParentLink} from './evolve'
+import type {Task} from './tasks'
 import {DEFAULT_BUDGET, checkBoard, componentScores, suggestBuckets, type Board, type BoardCheck, type Bucket} from './board'
 import {robustness, type Fit, type Robustness, type Scenario} from './scenario'
 import {BARRIER_LIMIT, emotionStats, emptyJourney, type EmotionStat, type Journey} from './journey'
@@ -34,7 +35,7 @@ export function createStage(opts: {
   projectId: string; template: StageTemplate; title: string; settings?: Partial<Settings>
   sourceProblem?: string; sourceFields?: Record<string, FieldValue>; refOptions?: {id: string; title: string}[]
   passport?: Passport; assumptions?: Assumption[]; experiments?: Experiment[]
-  seedCards?: Record<string, FieldValue>[]; persona?: string; now: number
+  seedCards?: Record<string, FieldValue>[]; persona?: string; tasks?: Task[]; now: number
 }): Stage {
   const settings = {...DEFAULT_SETTINGS, ...opts.settings}
   if (settings.timePreset === 'express') { settings.calibration = false; settings.secondRound = false; settings.evolve = false }
@@ -47,6 +48,7 @@ export function createStage(opts: {
     sourceProblem: opts.sourceProblem, sourceFields: opts.sourceFields, refOptions: opts.refOptions,
     passport: opts.passport ? structuredClone(opts.passport) : undefined, compliance: {},
     assumptions: structuredClone(opts.assumptions ?? []), experiments: structuredClone(opts.experiments ?? []),
+    tasks: structuredClone(opts.tasks ?? []),
     settings, phase: 'lobby', phaseStartedAt: opts.now, deadline: deadlineFor(settings, 'lobby', opts.now),
     participants: [],
     // Карточки, перенесённые с прошлого этапа (например, барьеры с карты пути), — без автора
@@ -129,6 +131,9 @@ export type Action =
   | {type: 'board.move'; cardIds: string[]; bucket: Bucket}
   | {type: 'board.deps'; cardId: string; deps: string[]}
   | {type: 'board.budget'; budget: number}
+  | {type: 'task.add'; id: string; title: string; ownerId?: string; deadline?: string; source?: 'risk' | 'manual'}
+  | {type: 'task.update'; id: string; patch: Partial<Pick<Task, 'title' | 'ownerId' | 'deadline' | 'done'>>}
+  | {type: 'task.delete'; id: string}
   | {type: 'card.delete'; id: string}
   | {type: 'merge.suggest'; a: string; b: string}
   | {type: 'card.develop'; id: string; parentId: string; fields: Record<string, FieldValue>; basis?: Basis}
@@ -446,6 +451,41 @@ export function reduce(stage: Stage, action: Action, actor: string, isHost: bool
       const n = Math.round(Number(action.budget) * 2) / 2
       if (!(n >= 1 && n <= 100)) fail('Бюджет — от 1 до 100 очков')
       b.budget = n
+      break
+    }
+
+    case 'task.add': {
+      if (!me && !isHost) fail('Сначала войдите в комнату')
+      const title = action.title.trim().slice(0, 200)
+      if (!title) fail('Сформулируйте задачу')
+      const list = s.tasks ?? []
+      if (list.length >= 100) fail('Задач слишком много — закройте выполненные')
+      if (list.some(t => t.id === action.id)) break
+      s.tasks = [...list, {
+        id: action.id.slice(0, 20), title, ownerId: action.ownerId?.slice(0, 40) || undefined,
+        deadline: validDate(action.deadline), done: false, source: action.source === 'risk' ? 'risk' : 'manual', authorId: actor, createdAt: now
+      }]
+      break
+    }
+
+    case 'task.update': {
+      const t = (s.tasks ?? []).find(x => x.id === action.id) ?? fail('Задача не найдена')
+      // Отметить выполненной может и ответственный; менять суть — автор или организатор
+      const onlyDone = Object.keys(action.patch).every(k => k === 'done')
+      if (!isHost && t.authorId !== actor && !(onlyDone && t.ownerId === actor)) fail('Изменять может автор, ответственный или организатор')
+      const p = action.patch
+      if (p.title !== undefined) t.title = String(p.title).trim().slice(0, 200) || t.title
+      if (p.ownerId !== undefined) t.ownerId = p.ownerId?.slice(0, 40) || undefined
+      if (p.deadline !== undefined) t.deadline = validDate(p.deadline)
+      if (p.done !== undefined) t.done = !!p.done
+      break
+    }
+
+    case 'task.delete': {
+      const t = (s.tasks ?? []).find(x => x.id === action.id)
+      if (!t) break
+      if (!isHost && t.authorId !== actor) fail('Удалять может автор или организатор')
+      s.tasks = (s.tasks ?? []).filter(x => x !== t)
       break
     }
 
@@ -806,6 +846,10 @@ function phaseIndex(s: Stage, p: Phase): number {
   return order.indexOf(p)
 }
 
+function validDate(d?: string): string | undefined {
+  return d && /^\d{4}-\d{2}-\d{2}$/.test(d) ? d : undefined
+}
+
 const CATEGORIES: AssumptionCategory[] = ['desirability', 'feasibility', 'viability']
 const STATUSES: AssumptionStatus[] = ['untested', 'testing', 'confirmed', 'partly', 'refuted', 'insufficient']
 const METHOD_NAMES: Record<ExperimentMethod, string> = {survey: 'Опрос', interview: 'Интервью', landing: 'Лендинг', prototype: 'Прототип', observation: 'Наблюдение', competitors: 'Анализ конкурентов'}
@@ -882,6 +926,7 @@ export interface PublicView {
   journey?: {persona: string; steps: Journey['steps']; proposals: Journey['proposals']; stats?: Record<string, EmotionStat>}
   assumptions: Assumption[]
   experiments: Experiment[]
+  tasks: Task[]
   round?: {open: boolean; revealed: boolean; ids: string[]; submitted: string[]; averages?: ReturnType<typeof roundAverages>}
   title: string
   sourceProblem?: string
@@ -956,6 +1001,7 @@ export function publicView(s: Stage, now: number): PublicView {
     // Авторство предположений скрыто при анонимности; оценки раунда наружу не уходят — только средние после раскрытия
     assumptions: (s.assumptions ?? []).map(a => (s.settings.anonymous ? {...a, authorId: ''} : a)),
     experiments: (s.experiments ?? []).map(e => (s.settings.anonymous ? {...e, authorId: ''} : e)),
+    tasks: (s.tasks ?? []).map(t => (s.settings.anonymous ? {...t, authorId: ''} : t)),
     round: s.assumptionRound && {
       open: s.assumptionRound.open, revealed: s.assumptionRound.revealed, ids: s.assumptionRound.ids,
       submitted: s.assumptionRound.submitted,
