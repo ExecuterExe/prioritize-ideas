@@ -9,6 +9,8 @@ import {AnchorLine, Anchors, Avatars, CardBody, ErrorLine, PhaseIntro, ScoreButt
 import {toast} from './toast'
 import {CardForm} from './cardform'
 import {ResultsView, SummaryView} from './results'
+import {PassportView} from './passport'
+import {passportFilled} from '../core/passport'
 
 export type Send = (a: Action) => Promise<string | null>
 
@@ -63,6 +65,7 @@ export function ParticipantStage({view, pid, send, storeKey}: Props) {
       return (
         <div class="stack">
           <PhaseIntro emoji="👋" title={`Привет, ${me.name}!`}>Вы в комнате. Как только все соберутся, организатор начнёт.</PhaseIntro>
+          {passportFilled(view.passport) && <div class="card"><h3>📋 Задание</h3><PassportView p={view.passport!} /><div class="tiny muted" style={{marginTop: 8}}>Задание всегда под рукой — кнопка 📋 вверху экрана.</div></div>}
           <div class="card stack">
             <b>Уже здесь</b>
             <Avatars people={view.participants.filter(p => p.active)} />

@@ -14,6 +14,8 @@ import {ParticipantStage} from './participant'
 import {ResultsView, SummaryView} from './results'
 import {toast} from './toast'
 import {TemplatesPage, allTemplates, useTemplates} from './templates'
+import {ComplianceCheck, PassportButton, PassportEditSheet, PassportEditor, PassportView} from './passport'
+import {EMPTY_PASSPORT, passportFilled, type Passport} from '../core/passport'
 
 declare const __SINGLE__: boolean
 
@@ -190,6 +192,7 @@ function NewStage({init, onCancel, onCreated}: {
   const [hostName, setHostName] = useState(p?.hostName ?? '')
   const [mode, setMode] = useState<'network' | 'single'>(__SINGLE__ ? 'single' : p?.mode ?? 'network')
   const [settings, setSettings] = useState<Partial<Settings>>({timePreset: 'standard', anonymous: true, cardLimit: 3, excludeAuthor: false, calibration: true, secondRound: true})
+  const [passport, setPassport] = useState<Passport>(p?.passport ?? {...EMPTY_PASSPORT})
 
   const workflow: Workflow | undefined = p
     ? p.workflow
@@ -205,10 +208,11 @@ function NewStage({init, onCancel, onCreated}: {
     const now = Date.now()
     const project: StoredProject = p ?? {
       id: uid(), title: projectTitle.trim(), createdAt: now, updatedAt: now, stages: [], snapshots: [], rooms: {},
-      hostPid: uid(), hostName: hostName.trim(), mode, workflow: workflow ? structuredClone(workflow) : undefined
+      hostPid: uid(), hostName: hostName.trim(), mode, workflow: workflow ? structuredClone(workflow) : undefined,
+      passport: passportFilled(passport) ? passport : undefined
     }
     const s = createStage({
-      projectId: project.id, template: tpl, now, settings,
+      projectId: project.id, template: tpl, now, settings, passport: project.passport,
       title: title.trim() || tpl.name,
       sourceProblem: sourceProblem.trim() || undefined,
       sourceFields: src?.card.fields,
@@ -271,6 +275,13 @@ function NewStage({init, onCancel, onCreated}: {
             {templates.map(t => <button key={t.id} class={`small ${templateId === t.id ? 'selected' : ''}`} onClick={() => setTemplateId(t.id)}>{t.emoji} {t.name}</button>)}
           </div>
         </div>
+      )}
+      {!p && (
+        <details class="card more" open={passportFilled(passport)}>
+          <summary>📋 Паспорт задания (необязательно, но очень помогает)</summary>
+          <div class="tiny muted" style={{margin: '6px 0 10px'}}>Команда увидит условия задания на всех шагах; ограничения можно сделать критериями, а на шаге «Решение» проверить соответствие.</div>
+          <PassportEditor value={passport} onChange={setPassport} />
+        </details>
       )}
       {tpl && (
         <div class="card stack">
@@ -377,7 +388,7 @@ function StageScreen({projectId, stageId, onExit, onNextStage}: {projectId: stri
       projectRef.current = p
       setProject(p)
       const persist = (s: Stage) => {
-        projectRef.current = withStage(projectRef.current!, s)
+        projectRef.current = {...withStage(projectRef.current!, s), passport: s.passport ?? projectRef.current!.passport}
         clearTimeout(saveTimer.current)
         saveTimer.current = setTimeout(() => { void saveProject(projectRef.current!); setProject(projectRef.current) }, 300)
       }
@@ -423,6 +434,7 @@ function StageUI({project, session, transport, joinUrl, onExit, onNextStage}: {
   const single = project.mode === 'single' || __SINGLE__
   const [tab, setTab] = useState<Tab>('panel')
   const [projector, setProjector] = useState(false)
+  const [editPassport, setEditPassport] = useState(false)
   const [err, setErr] = useState<string | null>(null)
   const hostPid = project.hostPid
 
@@ -455,6 +467,7 @@ function StageUI({project, session, transport, joinUrl, onExit, onNextStage}: {
             <div class="phase-title">{PHASE_LABEL[view.phase]}</div>
           </div>
           <span class="spacer" />
+          <PassportButton p={view.passport} onEdit={() => setEditPassport(true)} />
           {view.deadline && (
             <span class="row" style={{gap: 4}}>
               <Timer deadline={view.deadline} />
@@ -473,6 +486,8 @@ function StageUI({project, session, transport, joinUrl, onExit, onNextStage}: {
         </div>
         <div class="inner bar-progress"><PhaseSteps view={view} /></div>
       </div>
+      {editPassport && <PassportEditSheet value={view.passport} onClose={() => setEditPassport(false)}
+        onSave={pp => { if (!host({type: 'passport.update', passport: pp})) toast('Задание обновлено у всех') }} />}
       <div class="wrap stack">
         <ErrorLine msg={err} />
         {!projector && (
@@ -534,6 +549,7 @@ function HostPanel({view, stage, host, joinUrl, project, projector, onNextStage}
       return (
         <div class="stack">
         <PhaseIntro emoji="👋" title="Собираем команду">Покажите QR-код или отправьте ссылку в чат. Когда все появятся — жмите «Дальше».</PhaseIntro>
+        {passportFilled(view.passport) && <div class="card"><h3>📋 Задание</h3><PassportView p={view.passport!} /></div>}
         <div class="grid" style={{gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))'}}>
           <div class="card stack center">
             <h2>Наведите камеру</h2>
@@ -691,6 +707,21 @@ function CriteriaPanel({view, stage, host}: {view: PublicView; stage: Stage; hos
   return (
     <div class="stack">
       <PhaseIntro emoji="📏" title="По чему оцениваем">Утвердите 3–4 критерия. Предложения команды появляются здесь.</PhaseIntro>
+      {view.passport && [...view.passport.constraints, ...view.passport.mustHave].length > 0 && (
+        <div class="card stack">
+          <b>Из задания</b>
+          <div class="tiny muted">Сделайте условие критерием «Соответствие: …», если важно, чтобы карточки его выполняли.</div>
+          {[...view.passport.constraints, ...view.passport.mustHave].map(t => {
+            const added = view.criteria.some(c => c.name === `Соответствие: ${t}`.slice(0, 60))
+            return (
+              <div class="row between" key={t}>
+                <span class="small">{t}</span>
+                <button class="small" disabled={added} onClick={() => host({type: 'criterion.addFromPassport', text: t})}>{added ? 'Добавлен ✓' : 'Сделать критерием'}</button>
+              </div>
+            )
+          })}
+        </div>
+      )}
       {hints.map(h => <div class="hint" key={h}>💡 {h}</div>)}
       {view.criteria.map(c => <CriterionEditor key={c.id} c={c} host={host} proposer={name(c.proposedBy)} />)}
       <div class="card">
@@ -817,6 +848,8 @@ function DecidePanel({view, host}: {view: PublicView; host: (a: Action) => strin
                 onBlur={() => host({type: 'decision.set', cardId: r.cardId, status: d.status, reason})} />
             )}
             {needReason && !reason.trim() && <div class="hint">Запишите причину — это поможет при защите и при возврате к варианту.</div>}
+            {d?.status === 'chosen' && <ComplianceCheck p={view.passport} marks={view.compliance[r.cardId]}
+              onSet={(item, v) => host({type: 'compliance.set', cardId: r.cardId, item, value: v})} />}
           </div>
         )
       })}
@@ -862,6 +895,7 @@ function SingleScreen({view, stage, host, asParticipant, project, onNextStage}: 
   if (view.phase === 'lobby') {
     return (
       <div class="stack">
+        {passportFilled(view.passport) && <div class="card"><h3>📋 Задание</h3><PassportView p={view.passport!} /></div>}
         <div class="card stack">
           <h3>Кто участвует</h3>
           <div class="row">{stage.participants.map(p => <span class="chip" key={p.id}>{p.name}</span>)}</div>

@@ -9,6 +9,7 @@ import {lsGet, lsSet} from '../store/db'
 import {ErrorLine, PhaseSteps, Timer} from './common'
 import {ParticipantStage} from './participant'
 import {Brand} from './host'
+import {PassportButton} from './passport'
 
 export function JoinApp({roomId, secret}: {roomId: string; secret: string}) {
   const pidKey = `pi:pid:${roomId}`
@@ -77,6 +78,7 @@ export function JoinApp({roomId, secret}: {roomId: string; secret: string}) {
             <div class="tiny muted">{view ? `${view.title}` : 'Подключение…'}</div>
             <div class="phase-title">{view ? PHASE_LABEL[view.phase] : 'Ищем организатора…'}</div>
           </div>
+          {view && <PassportButton p={view.passport} />}
           {view && <Timer deadline={view.deadline} offset={session!.offset} />}
           <span title="Связь"><span class={`dot ${stale ? 'degraded' : net}`} /></span>
         </div>

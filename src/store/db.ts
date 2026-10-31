@@ -4,6 +4,7 @@ import {createStore, del, get, keys, set} from 'idb-keyval'
 import type {Project, Stage} from '../core/types'
 import {migrateStage, uid} from '../core/engine'
 import type {StageTemplate, Workflow} from '../core/template'
+import type {Passport} from '../core/passport'
 
 export interface RoomInfo {
   roomId: string
@@ -16,6 +17,7 @@ export interface StoredProject extends Project {
   hostName: string
   mode: 'network' | 'single'
   workflow?: Workflow
+  passport?: Passport
 }
 
 const store = typeof indexedDB !== 'undefined' ? createStore('prioritize-ideas', 'projects') : undefined

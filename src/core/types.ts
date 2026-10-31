@@ -1,6 +1,7 @@
 // Модель данных. Источник истины — объект Stage на ноутбуке организатора.
 
 import type {FieldValue, StageTemplate} from './template'
+import type {ComplianceValue, Passport} from './passport'
 
 // id шаблона этапа: 'problem', 'idea', 'hypothesis' или свой
 export type StageType = string
@@ -108,6 +109,8 @@ export interface Stage {
   sourceProblem?: string
   sourceFields?: Record<string, FieldValue>
   refOptions?: {id: string; title: string}[]
+  passport?: Passport
+  compliance?: Record<string, Record<string, ComplianceValue>>
   settings: Settings
   phase: Phase
   phaseStartedAt: number

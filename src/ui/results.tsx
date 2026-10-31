@@ -3,6 +3,8 @@ import {useState} from 'preact/hooks'
 import type {PublicView} from '../core/engine'
 import {asText, cardSubtitle, cardTitle, formatValue} from '../core/template'
 import {Badges, CardBody, CountUp, Dist, Matrix} from './common'
+import {ComplianceCheck} from './passport'
+import {complianceItems, passportFilled, passportMarkdown} from '../core/passport'
 import type {Action} from '../core/engine'
 
 type Send = (a: Action) => Promise<string | null>
@@ -159,6 +161,7 @@ export function buildMarkdown(view: PublicView, projectTitle: string): string {
   const crit = view.criteria.filter(c => c.approved)
   L.push(`# ${projectTitle} — ${view.template.name}`, '')
   if (view.sourceProblem) L.push(`**Исходим из:** ${view.sourceProblem}`, '')
+  if (passportFilled(view.passport)) L.push(passportMarkdown(view.passport!), '')
   L.push(`Участников: ${view.participants.filter(p => p.active).length}. Критерии: ${crit.map(c => `${c.name}${c.weight > 1 ? ` (вес ${c.weight})` : ''}`).join(', ')}.`, '')
   const title = (id: string) => {
     const c = view.cards.find(x => x.id === id)
@@ -180,6 +183,19 @@ export function buildMarkdown(view: PublicView, projectTitle: string): string {
       }
     }
     L.push('')
+  }
+  const items = complianceItems(view.passport)
+  if (items.length && chosen.length) {
+    L.push('## Соответствие заданию', '')
+    const mark = {ok: '✅', partly: '⚠️', fail: '❌'} as const
+    for (const d of chosen) {
+      L.push(`**${title(d.cardId)}**`)
+      for (const i of items) {
+        const v = view.compliance[d.cardId]?.[i.key]
+        L.push(`- ${v ? mark[v] : '—'} ${i.kind === 'must' ? 'Есть' : 'Не нарушено'}: ${i.text}`)
+      }
+      L.push('')
+    }
   }
   if (res) {
     L.push('## Рейтинг', '', '| # | Карточка | Балл | ' + crit.map(c => c.name).join(' | ') + ' | Отметки |', '|' + ' --- |'.repeat(4 + crit.length))
@@ -254,7 +270,13 @@ export function SummaryView({view, projectTitle, extra}: {view: PublicView; proj
         <h2>Итог</h2>
         {chosen.map(d => {
           const c = view.cards.find(x => x.id === d.cardId)
-          return c ? <div key={d.cardId} class="card" style={{background: 'var(--ok-soft)'}}><CardBody tpl={view.template} refOptions={view.refOptions} card={c} full />{d.reason && <div class="small" style={{marginTop: 6}}>Почему: {d.reason}</div>}</div> : null
+          return c ? (
+            <div key={d.cardId} class="card stack" style={{background: 'var(--ok-soft)'}}>
+              <CardBody tpl={view.template} refOptions={view.refOptions} card={c} full />
+              {d.reason && <div class="small">Почему: {d.reason}</div>}
+              <ComplianceCheck p={view.passport} marks={view.compliance[d.cardId]} readOnly />
+            </div>
+          ) : null
         })}
       </div>
       {lean && (

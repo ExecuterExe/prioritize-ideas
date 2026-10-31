@@ -5,6 +5,7 @@ import type {
 } from './types'
 import {fromLibrary} from './library'
 import {builtinTemplate, cardTitle, validateCard, type FieldValue, type StageTemplate} from './template'
+import type {ComplianceValue, Passport} from './passport'
 import {approvalQuota, calibrationSpread, computeResults, pickFinalists, type Results} from './math'
 import {criterionReady} from './lint'
 
@@ -26,13 +27,15 @@ export const TIMINGS: Record<'express' | 'standard', Partial<Record<Phase, numbe
 
 export function createStage(opts: {
   projectId: string; template: StageTemplate; title: string; settings?: Partial<Settings>
-  sourceProblem?: string; sourceFields?: Record<string, FieldValue>; refOptions?: {id: string; title: string}[]; now: number
+  sourceProblem?: string; sourceFields?: Record<string, FieldValue>; refOptions?: {id: string; title: string}[]
+  passport?: Passport; now: number
 }): Stage {
   const settings = {...DEFAULT_SETTINGS, ...opts.settings}
   if (settings.timePreset === 'express') { settings.calibration = false; settings.secondRound = false }
   return {
     id: uid(), projectId: opts.projectId, type: opts.template.id, template: structuredClone(opts.template), title: opts.title,
     sourceProblem: opts.sourceProblem, sourceFields: opts.sourceFields, refOptions: opts.refOptions,
+    passport: opts.passport ? structuredClone(opts.passport) : undefined, compliance: {},
     settings, phase: 'lobby', phaseStartedAt: opts.now, deadline: deadlineFor(settings, 'lobby', opts.now),
     participants: [], cards: [], criteria: [], calibration: [], approvals: [], finalists: [], ratings: [], bases: [],
     submitted: {}, args: [], decisions: [], mergeSuggestions: [], calibRevealed: false,
@@ -116,11 +119,15 @@ export type Action =
   | {type: 'calib.reveal'}
   | {type: 'round2.start'}
   | {type: 'decision.set'; cardId: string; status: DecisionStatus | null; reason?: string}
+  | {type: 'passport.update'; passport: Passport}
+  | {type: 'compliance.set'; cardId: string; item: string; value: ComplianceValue | null}
+  | {type: 'criterion.addFromPassport'; text: string}
 
 export const HOST_ONLY = new Set<Action['type']>([
   'phase.next', 'phase.back', 'deadline.extend', 'merge', 'unmerge', 'suggestion.dismiss', 'criterion.addLibrary',
   'criterion.update', 'criterion.remove', 'criterion.addCustom', 'settings.update', 'participant.setActive',
-  'participant.add', 'participant.rename', 'calib.reveal', 'round2.start', 'decision.set'
+  'participant.add', 'participant.rename', 'calib.reveal', 'round2.start', 'decision.set',
+  'passport.update', 'compliance.set', 'criterion.addFromPassport'
 ])
 
 export class ActionError extends Error {}
@@ -369,6 +376,39 @@ export function reduce(stage: Stage, action: Action, actor: string, isHost: bool
       break
     }
 
+    case 'passport.update': {
+      const p = action.passport
+      const list = (xs: unknown) => (Array.isArray(xs) ? xs.map(x => String(x).trim().slice(0, 200)).filter(Boolean).slice(0, 20) : [])
+      s.passport = {
+        sourceText: p.sourceText ? String(p.sourceText).slice(0, 4000) : undefined,
+        result: String(p.result ?? '').slice(0, 300), task: String(p.task ?? '').slice(0, 300), audience: String(p.audience ?? '').slice(0, 200),
+        constraints: list(p.constraints), mustHave: list(p.mustHave), forbidden: list(p.forbidden), teacherCriteria: list(p.teacherCriteria)
+      }
+      break
+    }
+
+    case 'compliance.set': {
+      if (!/^(must|forbid):\d+$/.test(action.item)) fail('Неизвестный пункт задания')
+      const marks = {...(s.compliance?.[action.cardId] ?? {})}
+      if (action.value) marks[action.item] = action.value
+      else delete marks[action.item]
+      s.compliance = {...(s.compliance ?? {}), [action.cardId]: marks}
+      break
+    }
+
+    case 'criterion.addFromPassport': {
+      const text = action.text.trim().slice(0, 120)
+      if (!text) fail('Пустое условие')
+      const name = `Соответствие: ${text}`.slice(0, 60)
+      if (s.criteria.some(c => c.name === name)) break
+      s.criteria.push({
+        id: uid(), name, question: `Насколько карточка выполняет условие задания «${text}»?`,
+        anchors: {1: 'Нарушает условие', 3: 'Выполняет частично', 5: 'Полностью выполняет'},
+        weight: 1, inverted: false, approved: true
+      })
+      break
+    }
+
     case 'deadline.extend':
       s.deadline = Math.max(s.deadline ?? now, now) + action.minutes * 60_000
       break
@@ -448,6 +488,8 @@ export interface PublicView {
   template: StageTemplate
   sourceFields?: Record<string, FieldValue>
   refOptions?: {id: string; title: string}[]
+  passport?: Passport
+  compliance: Record<string, Record<string, ComplianceValue>>
   title: string
   sourceProblem?: string
   settings: Settings
@@ -497,6 +539,7 @@ export function publicView(s: Stage, now: number): PublicView {
   const calibCard = s.cards.find(c => c.id === s.calibrationCardId)
   return {
     stageId: s.id, projectId: s.projectId, type: s.type, template: s.template, sourceFields: s.sourceFields, refOptions: s.refOptions,
+    passport: s.passport, compliance: s.compliance ?? {},
     title: s.title, sourceProblem: s.sourceProblem,
     settings: s.settings, phase: s.phase, flow: phaseFlow(s), deadline: s.deadline, hostTime: now, version: s.version,
     participants: s.participants.map(p => ({id: p.id, name: p.name, alias: p.alias, active: p.active})),
