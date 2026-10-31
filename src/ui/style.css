@@ -593,3 +593,22 @@ table.robust .top-cell { background: var(--mint-soft); color: var(--mint-deep); 
 .task-row.done .small { text-decoration: line-through; color: var(--muted); }
 .task-check { width: 22px; height: 22px; margin-top: 1px; flex: none; accent-color: var(--mint); }
 .task-check.exp { display: inline-grid; place-items: center; font-size: 1rem; }
+
+/* Вход: «Как будем работать?» */
+.entry-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; }
+.entry-card { flex-direction: column; align-items: flex-start; justify-content: flex-start; text-align: left; gap: 8px; height: auto; padding: 22px; border-radius: var(--radius); background: var(--surface); box-shadow: var(--shadow); transition: transform .15s ease, box-shadow .15s ease; }
+.entry-card:hover { transform: translateY(-2px); box-shadow: var(--shadow-lift); }
+.entry-card.main { border: 2px solid var(--violet); }
+.entry-card b { font-size: 1.15rem; }
+.entry-card small { color: var(--muted); font-weight: 600; }
+.entry-card ul { margin: 0; padding-left: 18px; font-weight: 500; font-size: .92rem; line-height: 1.5; }
+.entry-emoji { font-size: 2rem; line-height: 1; }
+.entry-foot { margin-top: auto; }
+
+/* Выпадающее меню «Ещё инструменты» */
+details.menu { position: relative; }
+details.menu > summary { list-style: none; cursor: pointer; font-size: .85rem; font-weight: 700; color: var(--violet); padding: 6px 10px; border-radius: 999px; }
+details.menu > summary::-webkit-details-marker { display: none; }
+details.menu[open] > summary { background: var(--surface-2); }
+.menu-panel { position: absolute; right: 0; top: calc(100% + 4px); z-index: 20; display: flex; flex-direction: column; align-items: stretch; gap: 2px; min-width: 250px; padding: 6px; background: var(--surface); border-radius: var(--radius-sm); box-shadow: var(--shadow-lift); }
+.menu-panel button { justify-content: flex-start; text-align: left; }

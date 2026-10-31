@@ -23,6 +23,7 @@ import {ComplianceCheck, PassportButton, PassportEditSheet, PassportEditor, Pass
 import {EMPTY_PASSPORT, passportFilled, type Passport} from '../core/passport'
 import {AssumptionsPanel} from './assumptions'
 import {ThreatNote} from './results'
+import {FREE_TEMPLATES, FULL_SETTINGS, GOALS, QUICK_SETTINGS, goalOf, goalWorkflow, visibleTools} from '../core/quickstart'
 
 declare const __SINGLE__: boolean
 
@@ -71,6 +72,9 @@ export function HostApp() {
       onNextStage={(p, fromStageId) => { setOpenId(null); setStageId(null); setCreating({project: p, fromStageId}) }} />
   }
   if (templatesOpen) return <TemplatesPage onBack={() => setTemplatesOpen(false)} />
+  if (creating && !creating.project) {
+    return <NewProject onCancel={() => setCreating(null)} onCreated={(p, s) => { setCreating(null); setOpenId(p.id); setStageId(s.id) }} />
+  }
   if (creating) {
     return <NewStage init={creating} onCancel={() => setCreating(null)} onCreated={(p, s) => { setCreating(null); setOpenId(p.id); setStageId(s.id) }} />
   }
@@ -174,8 +178,154 @@ function priorCards(p?: StoredProject) {
     .filter(x => x.card))
 }
 
-function NewStage({init, onCancel, onCreated}: {
+type StageOpts = Omit<Parameters<typeof createStage>[0], 'projectId' | 'now' | 'passport' | 'assumptions' | 'experiments' | 'tasks'>
+
+// Создаёт проект (если его ещё нет) и этап в нём; паспорт и реестры переходят из проекта
+async function launchStage(p: StoredProject | undefined, base: {title: string; hostName: string; mode: 'network' | 'single'; workflow?: Workflow; passport?: Passport}, opts: StageOpts) {
+  const now = Date.now()
+  const project: StoredProject = p ?? {
+    id: uid(), title: base.title.trim(), createdAt: now, updatedAt: now, stages: [], snapshots: [], rooms: {},
+    hostPid: uid(), hostName: base.hostName.trim(), mode: base.mode, workflow: base.workflow ? structuredClone(base.workflow) : undefined,
+    passport: base.passport && passportFilled(base.passport) ? base.passport : undefined
+  }
+  const s = createStage({
+    ...opts, projectId: project.id, now, passport: project.passport,
+    assumptions: project.assumptions, experiments: project.experiments, tasks: project.tasks
+  })
+  let next = withStage({...project, title: base.title.trim(), hostName: base.hostName.trim(), mode: base.mode}, s)
+  // Одна комната на проект: участники остаются подключены и сами переходят в новый этап
+  const prevRoom = Object.values(next.rooms).at(-1)
+  if (base.mode === 'network') next = {...next, rooms: {...next.rooms, [s.id]: prevRoom ?? {roomId: toB64u(randomBytes(12)), key: toB64u(randomBytes(32))}}}
+  await saveProject(next)
+  return {project: next, stage: s}
+}
+
+// ——— Новый проект: «Как будем работать?» ———
+
+function NewProject({onCancel, onCreated}: {onCancel: () => void; onCreated: (p: StoredProject, s: Stage) => void}) {
+  const [entry, setEntry] = useState<'choose' | 'quick' | 'full'>('choose')
+  const [names, setNames] = useState({title: '', hostName: ''})
+  if (entry === 'quick') return <QuickStart names={names} onNames={patch => setNames(n => ({...n, ...patch}))} onBack={() => setEntry('choose')} onFull={() => setEntry('full')} onCreated={onCreated} />
+  if (entry === 'full') return <NewStage init={{}} prefill={names} onCancel={() => setEntry('choose')} onCreated={onCreated} />
+  return (
+    <div class="narrow stack phase-enter">
+      <div>
+        <h1 style={{marginBottom: 4}}>Как будем работать?</h1>
+        <div class="muted">Выберите формат. Данные общие: из быстрого режима всегда можно открыть все инструменты.</div>
+      </div>
+      <div class="entry-grid">
+        <button class="entry-card main" onClick={() => setEntry('quick')}>
+          <span class="entry-emoji">⚡</span>
+          <b>Быстрая командная работа</b>
+          <span class="chip accent">Основной сценарий</span>
+          <small>Для занятий, командных заданий и коротких сессий.</small>
+          <ul>
+            <li>Собрать проблемы или идеи</li>
+            <li>Обсудить и оценить варианты</li>
+            <li>Выбрать лучшее и зафиксировать итог</li>
+          </ul>
+          <small class="entry-foot">Минимум настроек — запуск за минуту</small>
+        </button>
+        <button class="entry-card" onClick={() => setEntry('full')}>
+          <span class="entry-emoji">🛠</span>
+          <b>Полноценная проектная работа</b>
+          <span class="chip">Все инструменты</span>
+          <small>Для долгих проектов и глубокой проработки решений.</small>
+          <ul>
+            <li>Свои сценарии и шаблоны карточек</li>
+            <li>Паспорт задания, карта пути пользователя</li>
+            <li>Предположения, эксперименты, MVP, задачи</li>
+          </ul>
+          <small class="entry-foot">Все настройки под рукой</small>
+        </button>
+      </div>
+      <div><button class="ghost" onClick={onCancel}>Отмена</button></div>
+    </div>
+  )
+}
+
+function QuickStart({names, onNames, onBack, onFull, onCreated}: {
+  names: {title: string; hostName: string}; onNames: (patch: Partial<{title: string; hostName: string}>) => void
+  onBack: () => void; onFull: () => void; onCreated: (p: StoredProject, s: Stage) => void
+}) {
+  const [goalId, setGoalId] = useState('problem-to-idea')
+  const [freeTpl, setFreeTpl] = useState('problem')
+  const [context, setContext] = useState('')
+  const [mode, setMode] = useState<'network' | 'single'>(__SINGLE__ ? 'single' : 'network')
+  const [time, setTime] = useState<TimePreset>('standard')
+  const [busy, setBusy] = useState(false)
+  const goal = GOALS.find(g => g.id === goalId)!
+  const workflow = goalWorkflow(goal, freeTpl)
+  const tpl = BUILTIN_TEMPLATES.find(t => t.id === workflow.steps[0])
+  const tplLabel = (id: string) => { const t = BUILTIN_TEMPLATES.find(x => x.id === id); return t ? `${t.emoji} ${t.name}` : id }
+  const ok = !!names.title.trim() && !!names.hostName.trim() && !!tpl && !busy
+  const start = async () => {
+    if (!tpl) return
+    setBusy(true)
+    const {project, stage} = await launchStage(undefined, {...names, mode, workflow}, {
+      template: tpl, title: tpl.name, settings: {...QUICK_SETTINGS, timePreset: time},
+      sourceProblem: goal.contextLabel && context.trim() ? context.trim() : undefined
+    })
+    onCreated(project, stage)
+  }
+  return (
+    <div class="narrow stack phase-enter">
+      <h1 style={{marginBottom: 0}}>⚡ Быстрый старт</h1>
+      <div class="card stack">
+        <label class="field"><span>Название</span><input type="text" value={names.title} placeholder="Например: Инноватика, задание 1" onInput={e => onNames({title: (e.target as HTMLInputElement).value})} /></label>
+        <label class="field"><span>Ваше имя (вы тоже участник)</span><input type="text" value={names.hostName} onInput={e => onNames({hostName: (e.target as HTMLInputElement).value})} /></label>
+      </div>
+      <div class="card stack">
+        <h3>Что хотим получить?</h3>
+        <div class="grid" style={{gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))'}}>
+          {GOALS.map(g => (
+            <button key={g.id} class={`choice-card ${goalId === g.id ? 'selected' : ''}`} onClick={() => setGoalId(g.id)}>
+              <b>{g.emoji} {g.name}</b>
+              <small>{g.description}</small>
+            </button>
+          ))}
+        </div>
+        {goal.steps.length === 0 && (
+          <div class="row">
+            {FREE_TEMPLATES.map(id => (
+              <button key={id} class={`small ${freeTpl === id ? 'selected' : ''}`} onClick={() => setFreeTpl(id)}>{tplLabel(id)}</button>
+            ))}
+          </div>
+        )}
+        {goal.steps.length > 1 && <div class="tiny muted">Маршрут: {goal.steps.map(tplLabel).join(' → ')}</div>}
+        {goal.contextLabel && (
+          <label class="field"><span>{goal.contextLabel} (необязательно)</span>
+            <input type="text" value={context} placeholder="Одной строкой — участники увидят это на всех шагах" onInput={e => setContext((e.target as HTMLInputElement).value)} />
+          </label>
+        )}
+      </div>
+      <div class="card stack">
+        {!__SINGLE__ && (
+          <div class="row">
+            <button class={mode === 'network' ? 'selected' : ''} onClick={() => setMode('network')}>📱 С телефонов</button>
+            <button class={mode === 'single' ? 'selected' : ''} onClick={() => setMode('single')}>💻 Один экран</button>
+          </div>
+        )}
+        <div class="row">
+          {([['express', '≈20 мин'], ['standard', '≈45 мин'], ['none', 'Без таймера']] as [TimePreset, string][]).map(([k, l]) => (
+            <button key={k} class={`small ${time === k ? 'selected' : ''}`} onClick={() => setTime(k)}>{l}</button>
+          ))}
+        </div>
+        <div class="tiny muted">Анонимно, 3 карточки на человека, слепая оценка. Всё меняется в настройках сессии.</div>
+      </div>
+      <div class="row">
+        <button class="primary" disabled={!ok} onClick={start}>Запустить →</button>
+        <button class="ghost" onClick={onBack}>Назад</button>
+        <span class="spacer" />
+        <button class="ghost small" onClick={onFull}>Полная настройка →</button>
+      </div>
+    </div>
+  )
+}
+
+function NewStage({init, prefill, onCancel, onCreated}: {
   init: {project?: StoredProject; fromStageId?: string}
+  prefill?: {title: string; hostName: string}
   onCancel: () => void
   onCreated: (p: StoredProject, s: Stage) => void
 }) {
@@ -211,11 +361,17 @@ function NewStage({init, onCancel, onCreated}: {
   const src = prior.find(x => `${x.stage.id}:${x.card.id}` === sourceId)
   const srcText = (x?: typeof src) => x ? `${cardTitle(x.stage.template, x.card.fields)}${cardSubtitle(x.stage.template, x.card.fields) ? ` (${cardSubtitle(x.stage.template, x.card.fields)})` : ''}` : ''
   const [sourceProblem, setSourceProblem] = useState(srcText(defaultSource))
-  const [projectTitle, setProjectTitle] = useState(p?.title ?? '')
+  const [projectTitle, setProjectTitle] = useState(p?.title ?? prefill?.title ?? '')
   const [title, setTitle] = useState('')
-  const [hostName, setHostName] = useState(p?.hostName ?? '')
+  const [hostName, setHostName] = useState(p?.hostName ?? prefill?.hostName ?? '')
   const [mode, setMode] = useState<'network' | 'single'>(__SINGLE__ ? 'single' : p?.mode ?? 'network')
-  const [settings, setSettings] = useState<Partial<Settings>>({timePreset: 'standard', anonymous: true, cardLimit: 3, excludeAuthor: false, calibration: true, secondRound: true, evolve: true})
+  // Следующий этап наследует настройки прошлого, в том числе быстрый режим
+  const [settings, setSettings] = useState<Partial<Settings>>(() => {
+    const last = p?.stages.at(-1)?.settings
+    return last
+      ? {...(last.tools === 'quick' ? QUICK_SETTINGS : FULL_SETTINGS), timePreset: last.timePreset, anonymous: last.anonymous, cardLimit: last.cardLimit, excludeAuthor: last.excludeAuthor}
+      : {...FULL_SETTINGS}
+  })
   const [passport, setPassport] = useState<Passport>(p?.passport ?? {...EMPTY_PASSPORT})
 
   const workflow: Workflow | undefined = p
@@ -229,15 +385,8 @@ function NewStage({init, onCancel, onCreated}: {
 
   const create = async () => {
     if (!tpl) return
-    const now = Date.now()
-    const project: StoredProject = p ?? {
-      id: uid(), title: projectTitle.trim(), createdAt: now, updatedAt: now, stages: [], snapshots: [], rooms: {},
-      hostPid: uid(), hostName: hostName.trim(), mode, workflow: workflow ? structuredClone(workflow) : undefined,
-      passport: passportFilled(passport) ? passport : undefined
-    }
-    const s = createStage({
-      projectId: project.id, template: tpl, now, settings, passport: project.passport,
-      assumptions: project.assumptions, experiments: project.experiments, tasks: project.tasks,
+    const {project, stage} = await launchStage(p, {title: projectTitle, hostName, mode, workflow, passport}, {
+      template: tpl, settings,
       title: title.trim() || tpl.name,
       sourceProblem: sourceProblem.trim() || undefined,
       sourceFields: src?.card.fields,
@@ -246,12 +395,7 @@ function NewStage({init, onCancel, onCreated}: {
         ? journeySrc.list.filter(b => barriers.includes(b.id)).map(b => barrierToProblem(journeySrc.persona, b.step, b.text))
         : undefined
     })
-    let next = withStage({...project, title: projectTitle.trim(), hostName: hostName.trim(), mode}, s)
-    // Одна комната на проект: участники остаются подключены и сами переходят в новый этап
-    const prevRoom = Object.values(next.rooms).at(-1)
-    if (mode === 'network') next = {...next, rooms: {...next.rooms, [s.id]: prevRoom ?? {roomId: toB64u(randomBytes(12)), key: toB64u(randomBytes(32))}}}
-    await saveProject(next)
-    onCreated(next, s)
+    onCreated(project, stage)
   }
   const set = (patch: Partial<Settings>) => setSettings({...settings, ...patch})
   const tplName = (id: string) => { const t = templates.find(x => x.id === id); return t ? `${t.emoji} ${t.name}` : '?' }
@@ -503,6 +647,10 @@ function StageUI({project, session, transport, joinUrl, onExit, onNextStage}: {
   }
 
   const openTasks = buildPlan(view).items.filter(i => !i.done).length
+  // Быстрый режим: инструменты без данных убраны в «Ещё инструменты»
+  const tools = visibleTools(view.settings.tools, {assumptions: view.assumptions.length, tasks: view.tasks.length, roundOpen: view.round?.open}, goalOf(project.workflow))
+  const moreRef = useRef<HTMLDetailsElement>(null)
+  const closeMore = () => moreRef.current?.removeAttribute('open')
   const myTurn = !single && BLIND_PHASES.has(view.phase) && (view.phase === 'generate' ? !view.cardCounts[hostPid] : !view.progress[hostPid])
 
   return (
@@ -543,11 +691,23 @@ function StageUI({project, session, transport, joinUrl, onExit, onNextStage}: {
             <div class="tabs">
               <button class={tab === 'panel' ? 'on' : ''} onClick={() => setTab('panel')}>{single ? 'Сессия' : 'Команда'}</button>
               {!single && <button class={tab === 'me' ? 'on' : ''} onClick={() => setTab('me')}>Мой голос{myTurn ? ' •' : ''}</button>}
-              <button class={tab === 'assume' ? 'on' : ''} onClick={() => setTab('assume')}>🎯 Предположения{view.assumptions.length ? ` (${view.assumptions.length})` : ''}{view.round?.open ? ' •' : ''}</button>
-              <button class={tab === 'tasks' ? 'on' : ''} onClick={() => setTab('tasks')}>📋 Задачи{openTasks ? ` (${openTasks})` : ''}</button>
+              {(tools.assume || tab === 'assume') && <button class={tab === 'assume' ? 'on' : ''} onClick={() => setTab('assume')}>🎯 Предположения{view.assumptions.length ? ` (${view.assumptions.length})` : ''}{view.round?.open ? ' •' : ''}</button>}
+              {(tools.tasks || tab === 'tasks') && <button class={tab === 'tasks' ? 'on' : ''} onClick={() => setTab('tasks')}>📋 Задачи{openTasks ? ` (${openTasks})` : ''}</button>}
               {!single && <button class={tab === 'diag' ? 'on' : ''} onClick={() => setTab('diag')}>Связь</button>}
             </div>
-            <button class="ghost small" onClick={() => setProjector(true)} title="Крупный шрифт для проектора">⛶ Большой экран</button>
+            <span class="row" style={{gap: 4}}>
+              {(!tools.assume || !tools.tasks) && (
+                <details class="menu" ref={moreRef}>
+                  <summary class="ghost small">Ещё инструменты ▾</summary>
+                  <div class="menu-panel">
+                    {!tools.assume && <button class="ghost small" onClick={() => { setTab('assume'); closeMore() }}>🎯 Предположения и эксперименты</button>}
+                    {!tools.tasks && <button class="ghost small" onClick={() => { setTab('tasks'); closeMore() }}>📋 Кто что делает</button>}
+                    <button class="ghost small" onClick={() => { host({type: 'settings.update', patch: {tools: 'full'}}); closeMore(); toast('Все инструменты включены') }}>🛠 Включить все инструменты</button>
+                  </div>
+                </details>
+              )}
+              <button class="ghost small" onClick={() => setProjector(true)} title="Крупный шрифт для проектора">⛶ Большой экран</button>
+            </span>
           </div>
         )}
         {projector && <button class="small ghost no-print" onClick={() => setProjector(false)}>Обычный режим</button>}

@@ -32,7 +32,11 @@ export interface Settings {
   secondRound: boolean
   evolve?: boolean
   timePreset: TimePreset
+  // Быстрый режим прячет продвинутые инструменты в «Ещё инструменты»; нет поля — значит «всё видно»
+  tools?: Toolset
 }
+
+export type Toolset = 'quick' | 'full'
 
 export interface Participant {
   id: string

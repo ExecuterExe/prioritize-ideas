@@ -1,4 +1,5 @@
 // Приложение участника: вход по ссылке из QR-кода (#j=<roomId>.<key>).
+import {visibleTools} from '../core/quickstart'
 import {useEffect, useState} from 'preact/hooks'
 import {uid} from '../core/engine'
 import {fromB64u, importKey, sha256hex} from '../net/crypto'
@@ -82,6 +83,7 @@ export function JoinApp({roomId, secret}: {roomId: string; secret: string}) {
   const hostSeen = session?.hostSeen.value ?? 0
   useEffect(() => { if (hostSeen) setErr(null) }, [hostSeen])
   const stale = session && Date.now() - session.hostSeen.value > 25_000
+  const tools = view && visibleTools(view.settings.tools, {assumptions: view.assumptions.length, tasks: view.tasks.length, roundOpen: view.round?.open})
   return (
     <div>
       <div class="topbar">
@@ -91,8 +93,8 @@ export function JoinApp({roomId, secret}: {roomId: string; secret: string}) {
             <div class="phase-title">{view ? phaseName(view) : 'Ищем организатора…'}</div>
           </div>
           {view && <PassportButton p={view.passport} />}
-          {view && <button class="ghost icon-btn small" title="Кто что делает" aria-label="Задачи" onClick={() => setTasksOpen(true)}>✅</button>}
-          {view && <button class="ghost icon-btn small" title="Предположения" aria-label="Предположения" onClick={() => setAssumeOpen(true)}>🎯</button>}
+          {view && tools?.tasks && <button class="ghost icon-btn small" title="Кто что делает" aria-label="Задачи" onClick={() => setTasksOpen(true)}>✅</button>}
+          {view && tools?.assume && <button class="ghost icon-btn small" title="Предположения" aria-label="Предположения" onClick={() => setAssumeOpen(true)}>🎯</button>}
           {view && <Timer deadline={view.deadline} offset={session!.offset} />}
           <span title="Связь"><span class={`dot ${stale ? 'degraded' : net}`} /></span>
         </div>
