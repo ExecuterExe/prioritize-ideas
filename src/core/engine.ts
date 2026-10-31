@@ -7,6 +7,7 @@ import {fromLibrary} from './library'
 import {builtinTemplate, cardTitle, validateCard, type FieldValue, type StageTemplate} from './template'
 import type {ComplianceValue, Passport} from './passport'
 import {EVOLVE_LIMIT, assignEvolve, hashKey, type ParentLink} from './evolve'
+import {robustness, type Fit, type Robustness, type Scenario} from './scenario'
 import {BARRIER_LIMIT, emotionStats, emptyJourney, type EmotionStat, type Journey} from './journey'
 import {autoVerdict, roundAverages, type Assumption, type AssumptionCategory, type AssumptionStatus, type Experiment, type ExperimentMethod, type ThresholdKind} from './assume'
 import {approvalQuota, calibrationSpread, computeResults, pickFinalists, type Results} from './math'
@@ -118,6 +119,10 @@ export type Action =
   | {type: 'step.remove'; id: string}
   | {type: 'emotion.set'; stepId: string; value: number}
   | {type: 'journey.done'}
+  | {type: 'scenario.add'; id: string; name: string; description: string; weights: Record<string, number>; question?: string}
+  | {type: 'scenario.remove'; id: string}
+  | {type: 'scenario.answer'; id: string; answers: Record<string, Fit>}
+  | {type: 'scenario.close'; id: string}
   | {type: 'card.delete'; id: string}
   | {type: 'merge.suggest'; a: string; b: string}
   | {type: 'card.develop'; id: string; parentId: string; fields: Record<string, FieldValue>; basis?: Basis}
@@ -166,7 +171,7 @@ export const HOST_ONLY = new Set<Action['type']>([
   'criterion.update', 'criterion.remove', 'criterion.addCustom', 'settings.update', 'participant.setActive',
   'participant.add', 'participant.rename', 'calib.reveal', 'round2.start', 'decision.set',
   'passport.update', 'compliance.set', 'criterion.addFromPassport', 'round.open', 'round.reveal', 'round.close',
-  'journey.persona', 'step.add', 'step.update', 'step.remove'
+  'journey.persona', 'step.add', 'step.update', 'step.remove', 'scenario.add', 'scenario.remove', 'scenario.close'
 ])
 
 export class ActionError extends Error {}
@@ -368,6 +373,49 @@ export function reduce(stage: Stage, action: Action, actor: string, isHost: bool
       if (!s.journey || s.phase !== 'generate') fail('Сейчас не шаг барьеров')
       markSubmitted(s, 'generate', actor)
       break
+
+    case 'scenario.add': {
+      if (!['results', 'decide', 'summary'].includes(s.phase)) fail('Сценарии «что если» — после раскрытия результатов')
+      const name = action.name.trim().slice(0, 60)
+      if (!name) fail('Назовите сценарий')
+      const list = s.scenarios ?? []
+      if (list.length >= 6) fail('Сценариев уже 6 — удалите лишние')
+      const weights: Record<string, number> = {}
+      for (const [k, v] of Object.entries(action.weights ?? {})) {
+        const n = Number(v)
+        if (s.criteria.some(c => c.id === k) && n >= 0 && n <= 3) weights[k] = n
+      }
+      const question = action.question?.trim().slice(0, 200) || undefined
+      if (!question && !Object.keys(weights).length) fail('Измените веса или задайте условие-проверку')
+      s.scenarios = [...list, {
+        id: action.id.slice(0, 20), name, description: action.description.trim().slice(0, 200), weights, question,
+        open: !!question, answers: [], submitted: []
+      }]
+      break
+    }
+
+    case 'scenario.remove':
+      s.scenarios = (s.scenarios ?? []).filter(x => x.id !== action.id)
+      break
+
+    case 'scenario.answer': {
+      if (!me) fail('Сначала войдите в комнату')
+      const sc = (s.scenarios ?? []).find(x => x.id === action.id) ?? fail('Сценарий не найден')
+      if (!sc.open) fail('Ответы уже закрыты')
+      const fits = ['yes', 'partly', 'no']
+      const ans = s.finalists.filter(id => fits.includes(action.answers?.[id]))
+      if (ans.length < s.finalists.length) fail('Ответьте про все карточки')
+      sc.answers = sc.answers.filter(a => a.raterId !== actor).concat(ans.map(cardId => ({raterId: actor, cardId, fit: action.answers[cardId]})))
+      if (!sc.submitted.includes(actor)) sc.submitted.push(actor)
+      break
+    }
+
+    case 'scenario.close': {
+      const sc = (s.scenarios ?? []).find(x => x.id === action.id) ?? fail('Сценарий не найден')
+      if (!sc.answers.length) fail('Пока никто не ответил')
+      sc.open = false
+      break
+    }
 
     case 'merge.suggest':
       if (s.phase !== 'merge') fail('Предлагать склейку можно только на шаге склейки')
@@ -796,6 +844,8 @@ export interface PublicView {
   passport?: Passport
   compliance: Record<string, Record<string, ComplianceValue>>
   evolveAssign?: Record<string, string[]>
+  scenarios: Omit<Scenario, 'answers'>[]
+  robustness?: Robustness
   journey?: {persona: string; steps: Journey['steps']; proposals: Journey['proposals']; stats?: Record<string, EmotionStat>}
   assumptions: Assumption[]
   experiments: Experiment[]
@@ -853,6 +903,9 @@ export function publicView(s: Stage, now: number): PublicView {
   return {
     stageId: s.id, projectId: s.projectId, type: s.type, template: s.template, sourceFields: s.sourceFields, refOptions: s.refOptions,
     passport: s.passport, compliance: s.compliance ?? {},
+    // Ответы «выдерживает ли условие» — вслепую: наружу только кто ответил и итоговый пересчёт
+    scenarios: (s.scenarios ?? []).map(({answers: _a, ...rest}) => rest),
+    robustness: s.scenarios?.length && AFTER_REVEAL.includes(s.phase) ? robustness(s, s.scenarios) : undefined,
     // Эмоции — вслепую: до конца шага барьеров видно только, сколько отметок, средние — потом
     journey: s.journey && {
       persona: s.journey.persona, steps: s.journey.steps, proposals: s.journey.proposals,

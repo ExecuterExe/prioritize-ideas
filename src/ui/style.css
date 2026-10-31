@@ -567,3 +567,9 @@ button.emo.on { filter: none; opacity: 1; border-color: var(--violet); backgroun
 .curve .dot-e.low { stroke: var(--bad); stroke-width: 3; }
 .curve .face { font-size: 15px; }
 .curve .lbl { font: 600 11px var(--font); fill: var(--muted); }
+
+/* ——— Что если ——— */
+.scenarios { border-left: 4px solid var(--violet); }
+table.robust td, table.robust th { text-align: center; white-space: nowrap; }
+table.robust td:first-child, table.robust th:first-child { text-align: left; white-space: normal; min-width: 160px; }
+table.robust .top-cell { background: var(--mint-soft); color: var(--mint-deep); border-radius: 8px; }

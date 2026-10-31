@@ -672,7 +672,7 @@ function HostPanel({view, stage, host, joinUrl, project, projector, onNextStage}
         </div>
       )
     case 'results':
-      return <ResultsPanel view={view} host={host} />
+      return <ResultsPanel view={view} host={host} pid={project.hostPid} />
     case 'decide':
       return <DecidePanel view={view} host={host} />
     case 'summary':
@@ -865,7 +865,7 @@ function CalibratePanel({view, stage, host}: {view: PublicView; stage: Stage; ho
   )
 }
 
-function ResultsPanel({view, host}: {view: PublicView; host: (a: Action) => string | null}) {
+function ResultsPanel({view, host, pid}: {view: PublicView; host: (a: Action) => string | null; pid: string}) {
   const disputed = view.results?.cards.filter(c => c.disputed).length ?? 0
   return (
     <div class="stack">
@@ -878,7 +878,7 @@ function ResultsPanel({view, host}: {view: PublicView; host: (a: Action) => stri
           {view.round2Done && <div class="small muted">Второй раунд проведён — показаны его оценки и изменение разброса.</div>}
         </div>
       )}
-      <ResultsView view={view} canArgue={false} send={a => Promise.resolve(host(a))} />
+      <ResultsView view={view} canArgue={false} send={a => Promise.resolve(host(a))} isHost pid={pid} />
     </div>
   )
 }

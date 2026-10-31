@@ -5,6 +5,7 @@ import type {ComplianceValue, Passport} from './passport'
 import type {Assumption, AssumptionRound, Experiment} from './assume'
 import type {ParentLink} from './evolve'
 import type {Journey} from './journey'
+import type {Scenario} from './scenario'
 
 // id шаблона этапа: 'problem', 'idea', 'hypothesis' или свой
 export type StageType = string
@@ -143,6 +144,7 @@ export interface Stage {
   round2Done: boolean
   evolveAssign?: Record<string, string[]>
   journey?: Journey
+  scenarios?: Scenario[]
   version: number
   createdAt: number
 }

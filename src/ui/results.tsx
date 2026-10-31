@@ -9,6 +9,7 @@ import {CATEGORY_SHORT, METHOD_LABEL, STATUS_ICON, STATUS_LABEL, threatsFor} fro
 import {toast} from './toast'
 import {GenealogyTree, originLabel} from './evolve'
 import {RISK_STATUS_LABEL, riskRows} from '../core/risk'
+import {ScenariosPanel, scenariosMarkdown} from './scenarios'
 import type {Action} from '../core/engine'
 
 type Send = (a: Action) => Promise<string | null>
@@ -26,7 +27,7 @@ function defaultAxes(view: PublicView): [string, string] | null {
   return [crit[0].id, crit[1].id]
 }
 
-export function ResultsView({view, send, canArgue}: {view: PublicView; send?: Send; canArgue: boolean}) {
+export function ResultsView({view, send, canArgue, isHost = false, pid}: {view: PublicView; send?: Send; canArgue: boolean; isHost?: boolean; pid?: string}) {
   const res = view.results
   const [axes, setAxes] = useState<[string, string] | null>(() => defaultAxes(view))
   if (!res) return null
@@ -103,6 +104,7 @@ export function ResultsView({view, send, canArgue}: {view: PublicView; send?: Se
           </div>
         )
       })}
+      <ScenariosPanel view={view} send={send} isHost={isHost} pid={pid} />
       <GenealogyTree view={view} />
       {axes && (
         <div class="card">
@@ -216,6 +218,8 @@ export function buildMarkdown(view: PublicView, projectTitle: string): string {
     }
     L.push('')
   }
+  const sc = scenariosMarkdown(view)
+  if (sc) L.push(sc)
   const items = complianceItems(view.passport)
   if (items.length && chosen.length) {
     L.push('## Соответствие заданию', '')

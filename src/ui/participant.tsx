@@ -100,7 +100,7 @@ export function ParticipantStage({view, pid, send, storeKey, assignKey}: Props) 
           {view.phase === 'results'
             ? <PhaseIntro emoji="✨" title="Результаты открыты">У спорных ⚡ и «бриллиантов» 💎 можно анонимно добавить аргумент.</PhaseIntro>
             : <PhaseIntro emoji="🤝" title="Команда решает">Организатор отмечает выбранное — следите за значками.</PhaseIntro>}
-          <ResultsView view={view} send={send} canArgue />
+          <ResultsView view={view} send={send} canArgue pid={pid} />
         </div>
       )
     case 'summary':
