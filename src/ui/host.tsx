@@ -1,9 +1,10 @@
 // Приложение организатора: проекты, создание этапа, пульт, режим «Один экран».
 import {useEffect, useMemo, useRef, useState} from 'preact/hooks'
 import {createStage, uid, type Action, type PublicView} from '../core/engine'
-import {LIBRARY, cardTitle} from '../core/library'
+import {libraryFor} from '../core/library'
+import {BUILTIN_TEMPLATES, BUILTIN_WORKFLOWS, cardSubtitle, cardTitle, isEmpty, type Workflow} from '../core/template'
 import {lintCriteria, criterionReady} from '../core/lint'
-import {PHASE_LABEL, TAG_LABEL, type Criterion, type Settings, type Stage, type StageType, type Tag, type TimePreset} from '../core/types'
+import {PHASE_LABEL, TAG_LABEL, type Criterion, type Settings, type Stage, type Tag, type TimePreset} from '../core/types'
 import {fromB64u, importKey, randomBytes, sha256hex, toB64u} from '../net/crypto'
 import {NostrTransport, type RelayState} from '../net/nostr'
 import {HostSession} from '../net/session'
@@ -12,6 +13,7 @@ import {Avatar, Avatars, CardBody, ErrorLine, PhaseIntro, PhaseSteps, QR, Ring, 
 import {ParticipantStage} from './participant'
 import {ResultsView, SummaryView} from './results'
 import {toast} from './toast'
+import {TemplatesPage, allTemplates, useTemplates} from './templates'
 
 declare const __SINGLE__: boolean
 
@@ -43,7 +45,8 @@ export function HostApp() {
   }
   const openIdRef = useRef<string | null>(openId)
   openIdRef.current = openId
-  const [creating, setCreating] = useState<{project?: StoredProject; type?: StageType; sourceProblem?: string} | null>(null)
+  const [creating, setCreating] = useState<{project?: StoredProject; fromStageId?: string} | null>(null)
+  const [templatesOpen, setTemplatesOpen] = useState(false)
 
   const refresh = async () => setProjects(await listProjects())
   useEffect(() => { void refresh() }, [])
@@ -51,21 +54,23 @@ export function HostApp() {
   if (openId && stageId) {
     return <StageScreen key={stageId} projectId={openId} stageId={stageId}
       onExit={() => { setOpenId(null); setStageId(null); void refresh() }}
-      onNextStage={(p, sourceProblem) => { setOpenId(null); setStageId(null); setCreating({project: p, type: 'idea', sourceProblem}) }} />
+      onNextStage={(p, fromStageId) => { setOpenId(null); setStageId(null); setCreating({project: p, fromStageId}) }} />
   }
+  if (templatesOpen) return <TemplatesPage onBack={() => setTemplatesOpen(false)} />
   if (creating) {
     return <NewStage init={creating} onCancel={() => setCreating(null)} onCreated={(p, s) => { setCreating(null); setOpenId(p.id); setStageId(s.id) }} />
   }
   return <Home projects={projects} onOpen={(p, s) => { setOpenId(p.id); setStageId(s) }} onNew={() => setCreating({})}
-    onNewStage={p => setCreating({project: p})} onChanged={refresh} />
+    onNewStage={p => setCreating({project: p, fromStageId: p.stages.at(-1)?.id})} onChanged={refresh} onTemplates={() => setTemplatesOpen(true)} />
 }
 
-function Home({projects, onOpen, onNew, onNewStage, onChanged}: {
+function Home({projects, onOpen, onNew, onNewStage, onChanged, onTemplates}: {
   projects: StoredProject[] | null
   onOpen: (p: StoredProject, stageId: string) => void
   onNew: () => void
   onNewStage: (p: StoredProject) => void
   onChanged: () => void
+  onTemplates: () => void
 }) {
   const fileRef = useRef<HTMLInputElement>(null)
   const [err, setErr] = useState<string | null>(null)
@@ -100,6 +105,7 @@ function Home({projects, onOpen, onNew, onNewStage, onChanged}: {
       <div class="row">
         <button class="primary" onClick={onNew}>Новый проект</button>
         <button onClick={() => fileRef.current?.click()}>Открыть файл проекта</button>
+        <button class="ghost" onClick={onTemplates}>🧱 Шаблоны карточек</button>
         <input ref={fileRef} type="file" accept=".json,application/json" hidden onChange={e => { const f = (e.target as HTMLInputElement).files?.[0]; if (f) void importFile(f) }} />
       </div>
       <ErrorLine msg={err} />
@@ -111,10 +117,11 @@ function Home({projects, onOpen, onNew, onNewStage, onChanged}: {
             <h2 style={{margin: 0}}>{p.title}</h2>
             <span class="tiny muted">{new Date(p.updatedAt).toLocaleString('ru-RU')}</span>
           </div>
+          {p.workflow && <div class="tiny muted">Сценарий «{p.workflow.name}»</div>}
           {p.stages.map(s => (
             <div class="row between stage-row" key={s.id}>
               <div>
-                <b>{s.type === 'problem' ? 'Проблема' : 'Идея'}</b>: {s.title}
+                <b>{s.template.emoji} {s.template.name}</b>: {s.title}
                 <span class="chip" style={{marginLeft: 6}}>{PHASE_LABEL[s.phase]}</span>
               </div>
               <button class="small" onClick={() => onOpen(p, s.id)}>{s.phase === 'summary' ? 'Открыть' : 'Продолжить'}</button>
@@ -145,32 +152,67 @@ function Home({projects, onOpen, onNew, onNewStage, onChanged}: {
   )
 }
 
+// Карточки прошлых этапов, на которые можно опереться: выбранные и отложенные
+function priorCards(p?: StoredProject) {
+  return (p?.stages ?? []).flatMap(st => st.decisions
+    .filter(d => d.status === 'chosen' || d.status === 'deferred')
+    .map(d => ({stage: st, card: st.cards.find(c => c.id === d.cardId)!, status: d.status}))
+    .filter(x => x.card))
+}
+
 function NewStage({init, onCancel, onCreated}: {
-  init: {project?: StoredProject; type?: StageType; sourceProblem?: string}
+  init: {project?: StoredProject; fromStageId?: string}
   onCancel: () => void
   onCreated: (p: StoredProject, s: Stage) => void
 }) {
   const p = init.project
+  const [mine] = useTemplates()
+  const templates = allTemplates(mine)
+  const [workflowId, setWorkflowId] = useState<string>(p?.workflow?.id ?? 'classic')
+  const [custom, setCustom] = useState<string[]>([])
+  // Следующий шаблон по сценарию проекта
+  const nextInWorkflow = (() => {
+    if (!p?.workflow) return undefined
+    const last = p.stages.at(-1)?.template.id
+    const i = last ? p.workflow.steps.indexOf(last) : -1
+    return p.workflow.steps[i + 1]
+  })()
+  const [templateId, setTemplateId] = useState<string>(nextInWorkflow ?? p?.stages.at(-1)?.template.id ?? 'problem')
+  const prior = priorCards(p)
+  const fromStage = p?.stages.find(s => s.id === init.fromStageId)
+  const defaultSource = prior.find(x => x.stage.id === fromStage?.id && x.status === 'chosen') ?? prior.find(x => x.status === 'chosen')
+  const [sourceId, setSourceId] = useState<string>(defaultSource ? `${defaultSource.stage.id}:${defaultSource.card.id}` : '')
+  const src = prior.find(x => `${x.stage.id}:${x.card.id}` === sourceId)
+  const srcText = (x?: typeof src) => x ? `${cardTitle(x.stage.template, x.card.fields)}${cardSubtitle(x.stage.template, x.card.fields) ? ` (${cardSubtitle(x.stage.template, x.card.fields)})` : ''}` : ''
+  const [sourceProblem, setSourceProblem] = useState(srcText(defaultSource))
   const [projectTitle, setProjectTitle] = useState(p?.title ?? '')
-  const [type, setType] = useState<StageType>(init.type ?? 'problem')
-  const [title, setTitle] = useState(init.type === 'idea' ? 'Идеи решения' : '')
-  const [sourceProblem, setSourceProblem] = useState(init.sourceProblem ?? '')
+  const [title, setTitle] = useState('')
   const [hostName, setHostName] = useState(p?.hostName ?? '')
   const [mode, setMode] = useState<'network' | 'single'>(__SINGLE__ ? 'single' : p?.mode ?? 'network')
   const [settings, setSettings] = useState<Partial<Settings>>({timePreset: 'standard', anonymous: true, cardLimit: 3, excludeAuthor: false, calibration: true, secondRound: true})
-  const prevProblems = p?.stages.filter(s => s.type === 'problem').flatMap(s => s.decisions.filter(d => d.status === 'chosen').map(d => s.cards.find(c => c.id === d.cardId))).filter(Boolean) ?? []
-  const ok = projectTitle.trim() && hostName.trim() && (type === 'problem' || sourceProblem.trim())
+
+  const workflow: Workflow | undefined = p
+    ? p.workflow
+    : workflowId === 'custom'
+      ? {id: 'custom', name: 'Свой сценарий', description: '', steps: custom}
+      : BUILTIN_WORKFLOWS.find(w => w.id === workflowId)
+  const tplId = p ? templateId : workflow?.steps[0]
+  const tpl = templates.find(t => t.id === tplId)
+  const ok = projectTitle.trim() && hostName.trim() && !!tpl
 
   const create = async () => {
+    if (!tpl) return
     const now = Date.now()
     const project: StoredProject = p ?? {
       id: uid(), title: projectTitle.trim(), createdAt: now, updatedAt: now, stages: [], snapshots: [], rooms: {},
-      hostPid: uid(), hostName: hostName.trim(), mode
+      hostPid: uid(), hostName: hostName.trim(), mode, workflow: workflow ? structuredClone(workflow) : undefined
     }
     const s = createStage({
-      projectId: project.id, type, now, settings,
-      title: title.trim() || (type === 'problem' ? 'Выбор проблемы' : 'Выбор идеи'),
-      sourceProblem: type === 'idea' ? sourceProblem.trim() : undefined
+      projectId: project.id, template: tpl, now, settings,
+      title: title.trim() || tpl.name,
+      sourceProblem: sourceProblem.trim() || undefined,
+      sourceFields: src?.card.fields,
+      refOptions: prior.map(x => ({id: x.card.id, title: `${x.stage.template.emoji} ${cardTitle(x.stage.template, x.card.fields)}`}))
     })
     let next = withStage({...project, title: projectTitle.trim(), hostName: hostName.trim(), mode}, s)
     // Одна комната на проект: участники остаются подключены и сами переходят в новый этап
@@ -180,32 +222,81 @@ function NewStage({init, onCancel, onCreated}: {
     onCreated(next, s)
   }
   const set = (patch: Partial<Settings>) => setSettings({...settings, ...patch})
+  const tplName = (id: string) => { const t = templates.find(x => x.id === id); return t ? `${t.emoji} ${t.name}` : '?' }
   return (
-    <div class="narrow stack">
+    <div class="narrow stack phase-enter">
       <h1>{p ? 'Новый этап' : 'Новый проект'}</h1>
-      <div class="card stack">
-        <label class="field"><span>Название проекта</span><input type="text" value={projectTitle} disabled={!!p} placeholder="Например: Инноватика, задание 1" onInput={e => setProjectTitle((e.target as HTMLInputElement).value)} /></label>
-        <label class="field"><span>Ваше имя (вы тоже участник)</span><input type="text" value={hostName} disabled={!!p} onInput={e => setHostName((e.target as HTMLInputElement).value)} /></label>
-        <div>
-          <div class="small" style={{fontWeight: 600, marginBottom: 4}}>Что выбираем</div>
+      {!p && (
+        <div class="card stack">
+          <label class="field"><span>Название проекта</span><input type="text" value={projectTitle} placeholder="Например: Инноватика, задание 1" onInput={e => setProjectTitle((e.target as HTMLInputElement).value)} /></label>
+          <label class="field"><span>Ваше имя (вы тоже участник)</span><input type="text" value={hostName} onInput={e => setHostName((e.target as HTMLInputElement).value)} /></label>
+        </div>
+      )}
+      {!p && (
+        <div class="card stack">
+          <h3>Сценарий работы</h3>
+          <div class="grid" style={{gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))'}}>
+            {BUILTIN_WORKFLOWS.map(w => (
+              <button key={w.id} class={`choice-card ${workflowId === w.id ? 'selected' : ''}`} onClick={() => setWorkflowId(w.id)}>
+                <b>{w.name}</b>
+                <small>{w.steps.map(tplName).join(' → ')}</small>
+                <small>{w.description}</small>
+              </button>
+            ))}
+            <button class={`choice-card ${workflowId === 'custom' ? 'selected' : ''}`} onClick={() => setWorkflowId('custom')}>
+              <b>Свой сценарий</b>
+              <small>Соберите цепочку этапов из любых шаблонов</small>
+            </button>
+          </div>
+          {workflowId === 'custom' && (
+            <div class="stack">
+              <div class="row">
+                {custom.length === 0 && <span class="muted small">Добавьте этапы по порядку:</span>}
+                {custom.map((id, i) => (
+                  <span class="chip accent" key={i}>{i + 1}. {tplName(id)} <button class="ghost small" style={{minHeight: 0, padding: 0}} aria-label="Убрать" onClick={() => setCustom(custom.filter((_, j) => j !== i))}>✕</button></span>
+                ))}
+              </div>
+              <div class="row">
+                {templates.map(t => <button class="small" key={t.id} onClick={() => setCustom([...custom, t.id])}>+ {t.emoji} {t.name}</button>)}
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+      {p && (
+        <div class="card stack">
+          <h3>Шаблон этапа</h3>
+          {nextInWorkflow && <div class="tiny muted">По сценарию «{p.workflow!.name}» дальше: {tplName(nextInWorkflow)}</div>}
           <div class="row">
-            <button class={type === 'problem' ? 'selected' : ''} onClick={() => setType('problem')}>Проблему</button>
-            <button class={type === 'idea' ? 'selected' : ''} onClick={() => setType('idea')}>Идею решения</button>
+            {templates.map(t => <button key={t.id} class={`small ${templateId === t.id ? 'selected' : ''}`} onClick={() => setTemplateId(t.id)}>{t.emoji} {t.name}</button>)}
           </div>
         </div>
-        {type === 'idea' && (
-          <label class="field"><span>Для какой проблемы ищем идеи</span>
-            {prevProblems.length > 0 && (
-              <select value="" onChange={e => setSourceProblem((e.target as HTMLSelectElement).value)} style={{marginBottom: 6}}>
-                <option value="">— выбрать из прошлых этапов —</option>
-                {prevProblems.map(c => <option key={c!.id} value={`${c!.fields.what} (${c!.fields.who})`}>{cardTitle('problem', c!.fields)}</option>)}
+      )}
+      {tpl && (
+        <div class="card stack">
+          <div class="row between"><h3 style={{margin: 0}}>{p ? "Этап" : "Первый этап"}: {tpl.emoji} {tpl.name}</h3></div>
+          <div class="tiny muted">Поля: {tpl.fields.map(f => f.label + (f.required ? '*' : '')).join(' · ')}</div>
+          {prior.length > 0 && (
+            <label class="field"><span>Исходим из карточки прошлого этапа</span>
+              <select value={sourceId} onChange={e => {
+                const v = (e.target as HTMLSelectElement).value
+                setSourceId(v)
+                setSourceProblem(srcText(prior.find(x => `${x.stage.id}:${x.card.id}` === v)))
+              }}>
+                <option value="">— без исходной карточки —</option>
+                {prior.map(x => <option key={`${x.stage.id}:${x.card.id}`} value={`${x.stage.id}:${x.card.id}`}>{x.status === 'chosen' ? '✅' : '⏸'} {x.stage.template.emoji} {cardTitle(x.stage.template, x.card.fields)}</option>)}
               </select>
-            )}
-            <textarea value={sourceProblem} onInput={e => setSourceProblem((e.target as HTMLTextAreaElement).value)} />
+            </label>
+          )}
+          <label class="field"><span>Контекст для участников (необязательно)</span>
+            <textarea value={sourceProblem} placeholder="Например: проблема, для которой ищем идеи" onInput={e => setSourceProblem((e.target as HTMLTextAreaElement).value)} />
           </label>
-        )}
-        <label class="field"><span>Название этапа (необязательно)</span><input type="text" value={title} onInput={e => setTitle((e.target as HTMLInputElement).value)} /></label>
-      </div>
+          {src && tpl.fields.some(f => f.prefill && !isEmpty(src.card.fields[f.prefill])) && (
+            <div class="tiny muted">Подставится из исходной карточки: {tpl.fields.filter(f => f.prefill && !isEmpty(src.card.fields[f.prefill])).map(f => `«${f.label}»`).join(', ')}.</div>
+          )}
+          <label class="field"><span>Название этапа (необязательно)</span><input type="text" value={title} placeholder={tpl.name} onInput={e => setTitle((e.target as HTMLInputElement).value)} /></label>
+        </div>
+      )}
       <div class="card stack">
         <h3>Как работаем</h3>
         {!__SINGLE__ && (
@@ -267,7 +358,7 @@ function useWakeLock(active: boolean) {
   }, [active])
 }
 
-function StageScreen({projectId, stageId, onExit, onNextStage}: {projectId: string; stageId: string; onExit: () => void; onNextStage: (p: StoredProject, sourceProblem: string) => void}) {
+function StageScreen({projectId, stageId, onExit, onNextStage}: {projectId: string; stageId: string; onExit: () => void; onNextStage: (p: StoredProject, fromStageId: string) => void}) {
   const [project, setProject] = useState<StoredProject | null>(null)
   const [session, setSession] = useState<HostSession | null>(null)
   const [transport, setTransport] = useState<NostrTransport | null>(null)
@@ -325,7 +416,7 @@ type Tab = 'panel' | 'me' | 'diag'
 
 function StageUI({project, session, transport, joinUrl, onExit, onNextStage}: {
   project: StoredProject; session: HostSession; transport: NostrTransport | null; joinUrl: string
-  onExit: () => void; onNextStage: (p: StoredProject, sourceProblem: string) => void
+  onExit: () => void; onNextStage: (p: StoredProject, fromStageId: string) => void
 }) {
   const view = session.view.value
   const stage = session.stage.value
@@ -360,7 +451,7 @@ function StageUI({project, session, transport, joinUrl, onExit, onNextStage}: {
         <div class="inner bar-main">
           <button class="ghost icon-btn no-print" onClick={onExit} title="К проектам" aria-label="К проектам">←</button>
           <div style={{minWidth: 0}}>
-            <div class="step-label">{stepLabel(view)} · {view.type === 'problem' ? 'Проблема' : 'Идея'}</div>
+            <div class="step-label">{stepLabel(view)} · {view.template.emoji} {view.template.name}</div>
             <div class="phase-title">{PHASE_LABEL[view.phase]}</div>
           </div>
           <span class="spacer" />
@@ -402,23 +493,22 @@ function StageUI({project, session, transport, joinUrl, onExit, onNextStage}: {
         )}
         <div class="phase-enter" key={`${view.phase}-${tab}`}>
           {tab === 'panel' && (single
-            ? <SingleScreen view={view} stage={stage} host={host} asParticipant={asParticipant} project={project} />
+            ? <SingleScreen view={view} stage={stage} host={host} asParticipant={asParticipant} project={project} onNextStage={onNextStage} />
             : <HostPanel view={view} stage={stage} host={host} joinUrl={joinUrl} project={project} projector={projector} onNextStage={onNextStage} />)}
           {tab === 'me' && !single && <ParticipantStage view={view} pid={hostPid} send={asParticipant(hostPid)} storeKey={`pi:me:${stage.id}:${hostPid}`} />}
           {tab === 'diag' && transport && <Diagnostics transport={transport} />}
         </div>
-        {single && view.phase === 'summary' && <NextStageButton project={project} view={view} onNextStage={onNextStage} />}
       </div>
     </div>
   )
 }
 
-function NextStageButton({project, view, onNextStage}: {project: StoredProject; view: PublicView; onNextStage: (p: StoredProject, s: string) => void}) {
-  if (view.type !== 'problem') return null
-  const chosen = view.decisions.filter(d => d.status === 'chosen').map(d => view.cards.find(c => c.id === d.cardId)).filter(Boolean)
-  if (!chosen.length) return null
-  const text = chosen.map(c => `${c!.fields.what} (${c!.fields.who}, ${c!.fields.situation})`).join('; ')
-  return <button class="primary no-print" onClick={() => onNextStage(project, text)}>Перейти к идеям для выбранной проблемы →</button>
+function NextStageButton({project, view, onNextStage}: {project: StoredProject; view: PublicView; onNextStage: (p: StoredProject, fromStageId: string) => void}) {
+  if (!view.decisions.some(d => d.status === 'chosen')) return null
+  const steps = project.workflow?.steps ?? []
+  const next = steps[steps.indexOf(view.template.id) + 1]
+  const label = next ? `Дальше по сценарию: ${BUILTIN_TEMPLATES.find(t => t.id === next)?.name ?? 'следующий этап'} →` : 'Новый этап на основе выбранного →'
+  return <button class="primary no-print" onClick={() => onNextStage(project, view.stageId)}>{label}</button>
 }
 
 function Progress({view, stage}: {view: PublicView; stage: Stage}) {
@@ -437,7 +527,7 @@ function Progress({view, stage}: {view: PublicView; stage: Stage}) {
 
 function HostPanel({view, stage, host, joinUrl, project, projector, onNextStage}: {
   view: PublicView; stage: Stage; host: (a: Action) => string | null; joinUrl: string; project: StoredProject; projector: boolean
-  onNextStage: (p: StoredProject, s: string) => void
+  onNextStage: (p: StoredProject, fromStageId: string) => void
 }) {
   switch (view.phase) {
     case 'lobby':
@@ -553,7 +643,7 @@ function MergePanel({view, host}: {view: PublicView; host: (a: Action) => string
   const [drag, setDrag] = useState<string | null>(null)
   const [over, setOver] = useState<string | null>(null)
   const [pick, setPick] = useState<string | null>(null)
-  const title = (id: string) => { const c = view.cards.find(x => x.id === id); return c ? cardTitle(view.type, c.fields) : '?' }
+  const title = (id: string) => { const c = view.cards.find(x => x.id === id); return c ? cardTitle(view.template, c.fields) : '?' }
   const merge = (into: string, from: string) => { host({type: 'merge', into, from}); setPick(null) }
   return (
     <div class="stack">
@@ -576,13 +666,13 @@ function MergePanel({view, host}: {view: PublicView; host: (a: Action) => string
             onDragOver={e => { e.preventDefault(); if (drag && drag !== c.id) setOver(c.id) }}
             onDragLeave={() => setOver(null)}
             onDrop={e => { e.preventDefault(); if (drag && drag !== c.id) merge(c.id, drag); setOver(null) }}>
-            <CardBody type={view.type} card={c} full />
+            <CardBody tpl={view.template} refOptions={view.refOptions} card={c} full />
             <div class="row" style={{marginTop: 8}}>
               {pick === null && <button class="small" onClick={() => setPick(c.id)}>Склеить с…</button>}
               {pick === c.id && <button class="small" onClick={() => setPick(null)}>Отмена</button>}
               {pick !== null && pick !== c.id && <button class="small primary" onClick={() => merge(c.id, pick)}>Сюда</button>}
               {c.mergedIds.map((id, i) => (
-                <button key={id} class="small ghost" onClick={() => host({type: 'unmerge', id: c.id, childId: id})}>Разделить «{cardTitle(view.type, c.mergedTexts[i]).slice(0, 20)}…»</button>
+                <button key={id} class="small ghost" onClick={() => host({type: 'unmerge', id: c.id, childId: id})}>Разделить «{cardTitle(view.template, c.mergedTexts[i]).slice(0, 20)}…»</button>
               ))}
             </div>
           </div>
@@ -594,9 +684,9 @@ function MergePanel({view, host}: {view: PublicView; host: (a: Action) => string
 }
 
 function CriteriaPanel({view, stage, host}: {view: PublicView; stage: Stage; host: (a: Action) => string | null}) {
-  const hints = lintCriteria(view.type, view.criteria)
+  const hints = lintCriteria(view.template.kind, view.criteria)
   const present = new Set(view.criteria.map(c => c.fromLibrary).filter(Boolean))
-  const lib = LIBRARY.filter(l => l.for === view.type && !present.has(l.key))
+  const lib = libraryFor(view.template.kind).filter(l => !present.has(l.key))
   const name = (pid?: string) => stage.participants.find(p => p.id === pid)?.name
   return (
     <div class="stack">
@@ -662,7 +752,7 @@ function CalibratePanel({view, stage, host}: {view: PublicView; stage: Stage; ho
   return (
     <div class="stack">
       <PhaseIntro emoji="🎚️" title="Сверяем шкалы">Все оценивают одну пробную карточку — она не идёт в итог.</PhaseIntro>
-      {view.calibrationCard && <div class="card"><CardBody type={view.type} card={view.calibrationCard} full /></div>}
+      {view.calibrationCard && <div class="card"><CardBody tpl={view.template} refOptions={view.refOptions} card={view.calibrationCard} full /></div>}
       {!view.calibration && <Progress view={view} stage={stage} />}
       {!view.calibration && <button onClick={() => host({type: 'calib.reveal'})}>Показать разброс сейчас</button>}
       {view.calibration && view.calibration.map(r => {
@@ -714,7 +804,7 @@ function DecidePanel({view, host}: {view: PublicView; host: (a: Action) => strin
         return (
           <div class="card stack" key={r.cardId}>
             <div class="row between" style={{alignItems: 'flex-start'}}>
-              <div style={{flex: 1}}><span class="chip">#{r.rank} · {r.score ?? '—'}</span> {r.gem && <span class="chip gem">💎</span>} {r.disputed && <span class="chip warn">⚡</span>}<div style={{marginTop: 4}}><CardBody type={view.type} card={card} /></div></div>
+              <div style={{flex: 1}}><span class="chip">#{r.rank} · {r.score ?? '—'}</span> {r.gem && <span class="chip gem">💎</span>} {r.disputed && <span class="chip warn">⚡</span>}<div style={{marginTop: 4}}><CardBody tpl={view.template} refOptions={view.refOptions} card={card} /></div></div>
             </div>
             <div class="row">
               <button class={`small ${d?.status === 'chosen' ? 'primary' : ''}`} onClick={() => set(d?.status === 'chosen' ? null : 'chosen')}>✅ Выбрать</button>
@@ -758,8 +848,8 @@ function Diagnostics({transport}: {transport: NostrTransport}) {
 
 // ——— Режим «Один экран» ———
 
-function SingleScreen({view, stage, host, asParticipant, project}: {
-  view: PublicView; stage: Stage; host: (a: Action) => string | null; asParticipant: (pid: string) => (a: Action) => Promise<string | null>; project: StoredProject
+function SingleScreen({view, stage, host, asParticipant, project, onNextStage}: {
+  view: PublicView; stage: Stage; host: (a: Action) => string | null; asParticipant: (pid: string) => (a: Action) => Promise<string | null>; project: StoredProject; onNextStage: (p: StoredProject, fromStageId: string) => void
 }) {
   const [current, setCurrent] = useState<string | null>(null)
   const [revealed, setRevealed] = useState(false)
@@ -786,7 +876,7 @@ function SingleScreen({view, stage, host, asParticipant, project}: {
   }
 
   if (!blind) {
-    return <HostPanel view={view} stage={stage} host={host} joinUrl="" project={project} projector={false} onNextStage={() => {}} />
+    return <HostPanel view={view} stage={stage} host={host} joinUrl="" project={project} projector={false} onNextStage={onNextStage} />
   }
 
   // Слепые шаги: участники по очереди, с «шторкой» между ними

@@ -471,3 +471,24 @@ details.more[open] > summary::before { transform: rotate(90deg); }
 /* Строка-описание выбранной оценки */
 .anchor-line { margin-top: 8px; font-size: .82rem; color: var(--muted); min-height: 1.3em; transition: color .2s ease; }
 .anchor-line.picked { color: var(--sc); font-weight: 700; animation: fadeUp .25s ease both; }
+
+/* ——— Конструктор шаблонов ——— */
+.editor-grid { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 20px; align-items: start; }
+.preview-col { position: sticky; top: 16px; display: flex; flex-direction: column; gap: 10px; }
+.phone {
+  position: relative; border-radius: 38px; padding: 12px; background: linear-gradient(160deg, #2a2145, #120d22);
+  box-shadow: var(--shadow-lift), inset 0 0 0 2px rgba(255, 255, 255, .06);
+}
+.phone-notch { position: absolute; top: 12px; left: 50%; transform: translateX(-50%); width: 90px; height: 20px; border-radius: 0 0 14px 14px; background: #120d22; z-index: 1; }
+.phone-screen { background: var(--bg); border-radius: 28px; padding: 30px 14px 18px; max-height: 70vh; overflow-y: auto; }
+.phone-screen > * + * { margin-top: 10px; }
+.field-card { padding: 8px 10px; }
+.field-card.open { border-color: color-mix(in srgb, var(--violet) 45%, var(--border)); box-shadow: 0 0 0 3px color-mix(in srgb, var(--violet) 12%, transparent); }
+.field-card .ghost { min-height: 38px; }
+div.field > span { display: block; font-size: .85rem; font-weight: 700; margin-bottom: 6px; }
+.choice-card { text-align: left; justify-content: flex-start; align-items: flex-start; flex-direction: column; gap: 2px; border-radius: var(--radius-sm); padding: 12px 14px; height: auto; }
+.choice-card small { color: var(--muted); font-weight: 600; }
+@media (max-width: 860px) {
+  .editor-grid { grid-template-columns: 1fr; }
+  .preview-col { position: static; }
+}

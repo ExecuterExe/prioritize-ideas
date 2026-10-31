@@ -1,7 +1,7 @@
 // Результаты, итог и экспорт — общие для организатора и участников.
 import {useState} from 'preact/hooks'
 import type {PublicView} from '../core/engine'
-import {cardSubtitle, cardTitle} from '../core/library'
+import {asText, cardSubtitle, cardTitle, formatValue} from '../core/template'
 import {Badges, CardBody, CountUp, Dist, Matrix} from './common'
 import type {Action} from '../core/engine'
 
@@ -10,13 +10,13 @@ type Send = (a: Action) => Promise<string | null>
 function defaultAxes(view: PublicView): [string, string] | null {
   const crit = view.criteria.filter(c => c.approved)
   if (crit.length < 2) return null
-  if (view.type === 'idea') {
-    const x = crit.find(c => c.tag === 'feasibility'), y = crit.find(c => c.tag === 'novelty')
-    if (x && y) return [x.id, y.id]
-  } else {
-    const y = crit.find(c => c.fromLibrary === 'pain'), x = crit.find(c => c.fromLibrary === 'frequency')
+  const axes = view.template.matrixAxes
+  if (axes) {
+    const x = crit.find(c => c.fromLibrary === axes[0]), y = crit.find(c => c.fromLibrary === axes[1])
     if (x && y) return [x.id, y.id]
   }
+  const x = crit.find(c => c.tag === 'feasibility'), y = crit.find(c => c.tag === 'novelty')
+  if (x && y) return [x.id, y.id]
   return [crit[0].id, crit[1].id]
 }
 
@@ -35,8 +35,8 @@ export function ResultsView({view, send, canArgue}: {view: PublicView; send?: Se
           <div class="row between" style={{alignItems: 'flex-start', position: 'relative', zIndex: 1}}>
             <div style={{flex: 1, minWidth: 200}}>
               <div class="leader-kicker">🏆 Лидер команды</div>
-              <h2 style={{margin: '8px 0 4px', fontSize: '1.35rem'}}>{cardTitle(view.type, leaderCard.fields)}</h2>
-              <div class="small">{cardSubtitle(view.type, leaderCard.fields)}</div>
+              <h2 style={{margin: '8px 0 4px', fontSize: '1.35rem'}}>{cardTitle(view.template, leaderCard.fields)}</h2>
+              <div class="small">{cardSubtitle(view.template, leaderCard.fields)}</div>
             </div>
             <div class="score-big"><CountUp value={leader.score} /></div>
           </div>
@@ -54,7 +54,7 @@ export function ResultsView({view, send, canArgue}: {view: PublicView; send?: Se
             <div class="row" style={{alignItems: 'flex-start', gap: 12, flexWrap: 'nowrap'}}>
               <span class={`rank ${r.rank === 1 ? 'top' : ''}`}>{r.rank}</span>
               <div style={{flex: 1, minWidth: 0}}>
-                <CardBody type={view.type} card={card} />
+                <CardBody tpl={view.template} refOptions={view.refOptions} card={card} />
                 <div class="row" style={{gap: 6, marginTop: 6}}>
                   {decision?.status === 'chosen' && <span class="chip ok">✅ Выбрано</span>}
                   {decision?.status === 'deferred' && <span class="chip warn">⏸ Отложено</span>}
@@ -157,21 +157,28 @@ export function buildMarkdown(view: PublicView, projectTitle: string): string {
   const res = view.results
   const L: string[] = []
   const crit = view.criteria.filter(c => c.approved)
-  L.push(`# ${projectTitle} — ${view.type === 'problem' ? 'выбор проблемы' : 'выбор идеи'}`, '')
-  if (view.sourceProblem) L.push(`**Исходная проблема:** ${view.sourceProblem}`, '')
+  L.push(`# ${projectTitle} — ${view.template.name}`, '')
+  if (view.sourceProblem) L.push(`**Исходим из:** ${view.sourceProblem}`, '')
   L.push(`Участников: ${view.participants.filter(p => p.active).length}. Критерии: ${crit.map(c => `${c.name}${c.weight > 1 ? ` (вес ${c.weight})` : ''}`).join(', ')}.`, '')
   const title = (id: string) => {
     const c = view.cards.find(x => x.id === id)
-    return c ? cardTitle(view.type, c.fields) : id
+    return c ? cardTitle(view.template, c.fields) : id
   }
   const sub = (id: string) => {
     const c = view.cards.find(x => x.id === id)
-    return c ? cardSubtitle(view.type, c.fields) : ''
+    return c ? cardSubtitle(view.template, c.fields) : ''
   }
   const chosen = view.decisions.filter(d => d.status === 'chosen')
   if (chosen.length) {
     L.push('## Выбрано', '')
-    for (const d of chosen) L.push(`- **${title(d.cardId)}** — ${sub(d.cardId)}${d.reason ? `  \n  Почему: ${d.reason}` : ''}`)
+    for (const d of chosen) {
+      L.push(`- **${title(d.cardId)}**${sub(d.cardId) ? ` — ${sub(d.cardId)}` : ''}${d.reason ? `  \n  Почему: ${d.reason}` : ''}`)
+      const c = view.cards.find(x => x.id === d.cardId)
+      if (c) for (const f of view.template.fields) {
+        const v = formatValue(f, c.fields[f.key])
+        if (v && f.key !== view.template.titleField) L.push(`  - ${f.label}: ${v}`)
+      }
+    }
     L.push('')
   }
   if (res) {
@@ -202,27 +209,30 @@ export function buildMarkdown(view: PublicView, projectTitle: string): string {
   return L.join('\n')
 }
 
-export function buildLeanCanvas(view: PublicView): string {
+// Lean Canvas — только для встроенных видов «проблема» и «идея»
+export function buildLeanCanvas(view: PublicView): string | null {
+  if (view.template.kind === 'other') return null
+  const t = (v: unknown) => asText(v as never)
   const pick = (status: 'chosen' | 'deferred') => view.decisions.filter(d => d.status === status)
     .map(d => view.cards.find(c => c.id === d.cardId)).filter(Boolean) as PublicView['cards']
   const chosen = pick('chosen'), deferred = pick('deferred').slice(0, 2)
   const L: string[] = []
-  if (view.type === 'problem') {
+  if (view.template.kind === 'problem') {
     L.push('ПРОБЛЕМА (Problem)')
-    for (const c of [...chosen, ...deferred]) L.push(`• ${c.fields.what}${c.fields.situation ? ` (${c.fields.situation})` : ''}${c.fields.effect ? ` → ${c.fields.effect}` : ''}`)
+    for (const c of [...chosen, ...deferred]) L.push(`• ${t(c.fields.what)}${c.fields.situation ? ` (${t(c.fields.situation)})` : ''}${c.fields.effect ? ` → ${t(c.fields.effect)}` : ''}`)
     L.push('', 'СЕГМЕНТЫ ПОТРЕБИТЕЛЕЙ (Customer Segments)')
-    for (const w of [...new Set(chosen.map(c => c.fields.who).filter(Boolean))]) L.push(`• ${w}`)
+    for (const w of [...new Set(chosen.map(c => t(c.fields.who)).filter(Boolean))]) L.push(`• ${w}`)
     L.push('', 'СУЩЕСТВУЮЩИЕ АЛЬТЕРНАТИВЫ (Existing Alternatives)', '• заполните на этапе «Идея»')
   } else {
     L.push('ПРОБЛЕМА (Problem)', `• ${view.sourceProblem ?? '—'}`)
     L.push('', 'СЕГМЕНТЫ ПОТРЕБИТЕЛЕЙ (Customer Segments)')
-    for (const w of [...new Set(chosen.map(c => c.fields.who).filter(Boolean))]) L.push(`• ${w}`)
+    for (const w of [...new Set(chosen.map(c => t(c.fields.who)).filter(Boolean))]) L.push(`• ${w}`)
     L.push('', 'РЕШЕНИЕ (Solution)')
-    for (const c of chosen) L.push(`• ${c.fields.title}: ${c.fields.essence}`)
+    for (const c of chosen) L.push(`• ${t(c.fields.title)}: ${t(c.fields.essence)}`)
     L.push('', 'УНИКАЛЬНОЕ ЦЕННОСТНОЕ ПРЕДЛОЖЕНИЕ (UVP) — черновик')
-    for (const c of chosen) if (c.fields.how) L.push(`• ${c.fields.how}`)
+    for (const c of chosen) if (c.fields.how) L.push(`• ${t(c.fields.how)}`)
     L.push('', 'СУЩЕСТВУЮЩИЕ АЛЬТЕРНАТИВЫ (Existing Alternatives)')
-    const alts = [...new Set(view.cards.map(c => c.fields.alternatives).filter(Boolean))]
+    const alts = [...new Set(view.cards.map(c => t(c.fields.alternatives)).filter(Boolean))]
     for (const a of alts) L.push(`• ${a}`)
     if (!alts.length) L.push('• —')
   }
@@ -244,13 +254,15 @@ export function SummaryView({view, projectTitle, extra}: {view: PublicView; proj
         <h2>Итог</h2>
         {chosen.map(d => {
           const c = view.cards.find(x => x.id === d.cardId)
-          return c ? <div key={d.cardId} class="card" style={{background: 'var(--ok-soft)'}}><CardBody type={view.type} card={c} full />{d.reason && <div class="small" style={{marginTop: 6}}>Почему: {d.reason}</div>}</div> : null
+          return c ? <div key={d.cardId} class="card" style={{background: 'var(--ok-soft)'}}><CardBody tpl={view.template} refOptions={view.refOptions} card={c} full />{d.reason && <div class="small" style={{marginTop: 6}}>Почему: {d.reason}</div>}</div> : null
         })}
       </div>
+      {lean && (
       <div class="card">
         <div class="row between"><h3>Для Lean Canvas</h3><button class="small" onClick={() => copy(lean, 'Текст для Lean Canvas скопирован')}>Скопировать</button></div>
         <pre class="export">{lean}</pre>
       </div>
+      )}
       <div class="card no-print">
         <div class="row between"><h3>Отчёт (Markdown)</h3>
           <div class="row">

@@ -1,9 +1,9 @@
 import {useEffect, useState} from 'preact/hooks'
 import qrcode from 'qrcode-generator'
 import type {PublicCard, PublicView} from '../core/engine'
-import {CARD_FIELDS, cardSubtitle, cardTitle} from '../core/library'
+import {cardSubtitle, cardTitle, formatValue, type FieldDef, type StageTemplate} from '../core/template'
 import type {CardResult} from '../core/math'
-import {PHASE_LABEL, type Criterion, type Phase, type StageType} from '../core/types'
+import {PHASE_LABEL, type Criterion, type Phase} from '../core/types'
 
 export function plural(n: number, one: string, few: string, many: string) {
   const m10 = n % 10, m100 = n % 100
@@ -140,23 +140,30 @@ export function Waiting({view, title, onEdit, editLabel = 'Изменить от
   )
 }
 
-export function CardBody({type, card, full = false}: {type: StageType; card: PublicCard; full?: boolean}) {
-  const fields = CARD_FIELDS[type]
+export function CardBody({tpl, card, full = false, refOptions}: {tpl: StageTemplate; card: PublicCard; full?: boolean; refOptions?: {id: string; title: string}[]}) {
+  const show = (f: FieldDef) => {
+    const v = card.fields[f.key]
+    if (f.type === 'cardref') return refOptions?.find(o => o.id === v)?.title ?? formatValue(f, v)
+    return formatValue(f, v)
+  }
   return (
     <div>
-      <div style={{fontWeight: 600}}>{cardTitle(type, card.fields)}</div>
-      {!full && <div class="muted small">{cardSubtitle(type, card.fields)}</div>}
+      <div style={{fontWeight: 600}}>{cardTitle(tpl, card.fields)}</div>
+      {!full && <div class="muted small">{cardSubtitle(tpl, card.fields)}</div>}
       {full && (
         <div class="small stack" style={{marginTop: 6}}>
-          {fields.filter(f => card.fields[f.key] && !(type === 'problem' && f.key === 'what') && !(type === 'idea' && f.key === 'title')).map(f => (
-            <div key={f.key}><span class="muted">{f.label}: </span>{card.fields[f.key]}</div>
+          {tpl.fields.filter(f => f.key !== tpl.titleField && show(f)).map(f => (
+            <div key={f.key}>
+              <span class="muted">{f.label}: </span>
+              {f.type === 'link' ? <a href={String(card.fields[f.key])} target="_blank" rel="noopener noreferrer">{show(f)}</a> : show(f)}
+            </div>
           ))}
         </div>
       )}
       {card.mergedTexts.length > 0 && (
         <details class="small" style={{marginTop: 6}}>
           <summary class="muted">Склеено: ещё {card.mergedTexts.length}</summary>
-          {card.mergedTexts.map((t, i) => <div key={i} style={{marginTop: 4}}>• {cardTitle(type, t)} <span class="muted">{cardSubtitle(type, t)}</span></div>)}
+          {card.mergedTexts.map((t, i) => <div key={i} style={{marginTop: 4}}>• {cardTitle(tpl, t)} <span class="muted">{cardSubtitle(tpl, t)}</span></div>)}
         </details>
       )}
       {card.authorAliases && <div class="tiny muted" style={{marginTop: 4}}>Авторы: {card.authorAliases.join(', ')}</div>}

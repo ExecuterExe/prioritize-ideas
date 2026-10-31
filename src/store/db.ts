@@ -2,7 +2,8 @@
 // Участник: localStorage (id, имя, черновики карточек и оценок).
 import {createStore, del, get, keys, set} from 'idb-keyval'
 import type {Project, Stage} from '../core/types'
-import {uid} from '../core/engine'
+import {migrateStage, uid} from '../core/engine'
+import type {StageTemplate, Workflow} from '../core/template'
 
 export interface RoomInfo {
   roomId: string
@@ -14,19 +15,28 @@ export interface StoredProject extends Project {
   hostPid: string
   hostName: string
   mode: 'network' | 'single'
+  workflow?: Workflow
 }
 
 const store = typeof indexedDB !== 'undefined' ? createStore('prioritize-ideas', 'projects') : undefined
+// Отдельная база: idb-keyval создаёт одно хранилище на базу
+const tplStore = typeof indexedDB !== 'undefined' ? createStore('prioritize-ideas-templates', 'templates') : undefined
+
+// Старые проекты (до конструктора): у этапов появляется шаблон
+function migrate(p: StoredProject): StoredProject {
+  return {...p, stages: p.stages.map(migrateStage), snapshots: (p.snapshots ?? []).map(sn => ({...sn, stage: migrateStage(sn.stage)}))}
+}
 
 export async function listProjects(): Promise<StoredProject[]> {
   if (!store) return []
   const ks = await keys(store)
   const all = await Promise.all(ks.map(k => get<StoredProject>(k, store)))
-  return all.filter((p): p is StoredProject => !!p).sort((a, b) => b.updatedAt - a.updatedAt)
+  return all.filter((p): p is StoredProject => !!p).map(migrate).sort((a, b) => b.updatedAt - a.updatedAt)
 }
 
 export async function loadProject(id: string): Promise<StoredProject | undefined> {
-  return store ? get<StoredProject>(id, store) : undefined
+  const p = store ? await get<StoredProject>(id, store) : undefined
+  return p && migrate(p)
 }
 
 export async function saveProject(p: StoredProject): Promise<void> {
@@ -70,4 +80,21 @@ export function downloadFile(name: string, text: string, type = 'application/jso
   a.download = name
   a.click()
   setTimeout(() => URL.revokeObjectURL(a.href), 1000)
+}
+
+// ——— Мои шаблоны ———
+
+export async function listTemplates(): Promise<StageTemplate[]> {
+  if (!tplStore) return []
+  const ks = await keys(tplStore)
+  const all = await Promise.all(ks.map(k => get<StageTemplate>(k, tplStore)))
+  return all.filter((t): t is StageTemplate => !!t).sort((a, b) => (b.updatedAt ?? 0) - (a.updatedAt ?? 0))
+}
+
+export async function saveTemplate(t: StageTemplate): Promise<void> {
+  if (tplStore) await set(t.id, {...t, builtin: false, updatedAt: Date.now()}, tplStore)
+}
+
+export async function deleteTemplate(id: string): Promise<void> {
+  if (tplStore) await del(id, tplStore)
 }

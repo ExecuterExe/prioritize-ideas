@@ -1,6 +1,9 @@
 // Модель данных. Источник истины — объект Stage на ноутбуке организатора.
 
-export type StageType = 'problem' | 'idea'
+import type {FieldValue, StageTemplate} from './template'
+
+// id шаблона этапа: 'problem', 'idea', 'hypothesis' или свой
+export type StageType = string
 
 export type Phase =
   | 'lobby' | 'generate' | 'merge' | 'criteria' | 'calibrate' | 'shortlist'
@@ -35,7 +38,7 @@ export interface Participant {
 export interface Card {
   id: string
   authorIds: string[]
-  fields: Record<string, string>
+  fields: Record<string, FieldValue>
   basis?: Basis
   mergedFrom: Card[]
   createdAt: number
@@ -100,8 +103,11 @@ export interface Stage {
   id: string
   projectId: string
   type: StageType
+  template: StageTemplate
   title: string
   sourceProblem?: string
+  sourceFields?: Record<string, FieldValue>
+  refOptions?: {id: string; title: string}[]
   settings: Settings
   phase: Phase
   phaseStartedAt: number

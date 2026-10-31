@@ -1,9 +1,10 @@
 // Стартовая библиотека критериев и шаблоны карточек.
-import type {Criterion, StageType, Tag} from './types'
+import type {Criterion, Tag} from './types'
+import type {TemplateKind} from './template'
 
 export interface LibraryCriterion {
   key: string
-  for: StageType
+  for: 'problem' | 'idea'
   name: string
   question: string
   anchors: {1: string; 3: string; 5: string}
@@ -53,9 +54,9 @@ export const LIBRARY: LibraryCriterion[] = [
     anchors: {1: 'Непонятно, кто заплатит', 3: 'Есть идея модели', 5: 'Понятно кто, за что и сколько'}}
 ]
 
-export const DEFAULT_CRITERIA: Record<StageType, string[]> = {
-  problem: ['pain', 'frequency', 'reach'],
-  idea: ['novelty', 'feasibility', 'user-value']
+// Библиотека критериев для вида шаблона: у «другого» доступны все
+export function libraryFor(kind: TemplateKind): LibraryCriterion[] {
+  return kind === 'other' ? LIBRARY : LIBRARY.filter(l => l.for === kind)
 }
 
 export function fromLibrary(key: string, id: string): Criterion {
@@ -64,38 +65,4 @@ export function fromLibrary(key: string, id: string): Criterion {
     id, name: c.name, question: c.question, anchors: {...c.anchors}, weight: 1,
     inverted: !!c.inverted, tag: c.tag, fromLibrary: c.key, approved: true
   }
-}
-
-export interface FieldDef {
-  key: string
-  label: string
-  hint: string
-  required: boolean
-  multiline?: boolean
-}
-
-export const CARD_FIELDS: Record<StageType, FieldDef[]> = {
-  problem: [
-    {key: 'who', label: 'Кто сталкивается', hint: 'студенты-первокурсники, живущие в общежитии', required: true},
-    {key: 'situation', label: 'В какой ситуации', hint: 'когда нужно…', required: true},
-    {key: 'what', label: 'Что мешает', hint: 'суть проблемы в 1–2 предложениях', required: true, multiline: true},
-    {key: 'effect', label: 'К чему приводит', hint: 'последствие (необязательно)', required: false}
-  ],
-  idea: [
-    {key: 'title', label: 'Название', hint: '2–5 слов', required: true},
-    {key: 'essence', label: 'Суть', hint: 'что это, 1–2 предложения', required: true, multiline: true},
-    {key: 'who', label: 'Для кого', hint: 'кто будет пользоваться', required: true},
-    {key: 'how', label: 'Как решает проблему', hint: 'механизм', required: true, multiline: true},
-    {key: 'alternatives', label: 'Чем пользуются сейчас', hint: 'существующие альтернативы (необязательно)', required: false}
-  ]
-}
-
-export function cardTitle(type: StageType, fields: Record<string, string>): string {
-  if (type === 'idea') return fields.title || fields.essence || 'Без названия'
-  return fields.what || 'Без описания'
-}
-
-export function cardSubtitle(type: StageType, fields: Record<string, string>): string {
-  if (type === 'idea') return fields.essence || ''
-  return [fields.who, fields.situation].filter(Boolean).join(' · ')
 }

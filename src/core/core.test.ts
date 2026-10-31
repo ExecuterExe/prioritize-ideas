@@ -1,7 +1,8 @@
 import {describe, expect, it} from 'vitest'
 import {createStage, publicView, reduce, type Action} from './engine'
 import {approvalQuota, computeResults, isDisputed, median, pickFinalists, toPercent} from './math'
-import {lintCard, lintCriteria} from './lint'
+import {lintCriteria} from './lint'
+import {builtinTemplate, lintCard} from './template'
 import {fromLibrary} from './library'
 import type {Score, Stage} from './types'
 
@@ -10,7 +11,7 @@ let clock = 1_000_000
 const act = (s: Stage, a: Action, actor = HOST, isHost = actor === HOST) => reduce(s, a, actor, isHost, clock++)
 
 function stageWith(people: string[]) {
-  let s = createStage({projectId: 'p', type: 'problem', title: 't', settings: {calibration: false, timePreset: 'none'}, now: clock})
+  let s = createStage({projectId: 'p', template: builtinTemplate('problem')!, title: 't', settings: {calibration: false, timePreset: 'none'}, now: clock})
   for (const p of people) s = act(s, {type: 'hello', name: p.toUpperCase()}, p, false)
   return s
 }
@@ -109,8 +110,8 @@ describe('full flow', () => {
     let s = stageWith(['a'])
     s = act(s, {type: 'settings.update', patch: {cardLimit: 1}})
     s = act(s, {type: 'phase.next'})
-    s = act(s, {type: 'card.upsert', id: 'x', fields: {what: 'one'}}, 'a', false)
-    expect(() => act(s, {type: 'card.upsert', id: 'y', fields: {what: 'two'}}, 'a', false)).toThrow('Лимит')
+    s = act(s, {type: 'card.upsert', id: 'x', fields: {who: 'a', situation: 'b', what: 'one'}}, 'a', false)
+    expect(() => act(s, {type: 'card.upsert', id: 'y', fields: {who: 'a', situation: 'b', what: 'two'}}, 'a', false)).toThrow('Лимит')
   })
 
   it('author exclusion and inverted criteria', () => {
@@ -151,8 +152,8 @@ describe('full flow', () => {
 
 describe('lint', () => {
   it('flags solutions in problems', () => {
-    expect(lintCard('problem', {what: 'Нужно сделать приложение для поиска прачечной'})[0]).toContain('решение')
-    expect(lintCard('problem', {who: 'студенты', what: 'Не могут найти свободную прачечную вечером в общежитии'})).toContain('Уточните, какие именно люди')
+    expect(lintCard(builtinTemplate('problem')!, {what: 'Нужно сделать приложение для поиска прачечной'})[0]).toContain('решение')
+    expect(lintCard(builtinTemplate('problem')!, {who: 'студенты', what: 'Не могут найти свободную прачечную вечером в общежитии'})).toContain('Уточните, какие именно люди')
   })
   it('flags duplicated criteria', () => {
     const a = {...fromLibrary('pain', '1'), name: 'Актуальность'}

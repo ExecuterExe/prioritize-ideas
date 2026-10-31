@@ -3,7 +3,8 @@
 import type {
   Arg, Basis, Card, Criterion, Decision, DecisionStatus, Participant, Phase, Score, Settings, Stage, StageType, Tag
 } from './types'
-import {DEFAULT_CRITERIA, fromLibrary} from './library'
+import {fromLibrary} from './library'
+import {builtinTemplate, cardTitle, validateCard, type FieldValue, type StageTemplate} from './template'
 import {approvalQuota, calibrationSpread, computeResults, pickFinalists, type Results} from './math'
 import {criterionReady} from './lint'
 
@@ -23,11 +24,15 @@ export const TIMINGS: Record<'express' | 'standard', Partial<Record<Phase, numbe
   standard: {lobby: 2, generate: 8, merge: 4, criteria: 5, calibrate: 2, shortlist: 2, rate: 7, results: 6, rate2: 3, decide: 5}
 }
 
-export function createStage(opts: {projectId: string; type: StageType; title: string; settings?: Partial<Settings>; sourceProblem?: string; now: number}): Stage {
+export function createStage(opts: {
+  projectId: string; template: StageTemplate; title: string; settings?: Partial<Settings>
+  sourceProblem?: string; sourceFields?: Record<string, FieldValue>; refOptions?: {id: string; title: string}[]; now: number
+}): Stage {
   const settings = {...DEFAULT_SETTINGS, ...opts.settings}
   if (settings.timePreset === 'express') { settings.calibration = false; settings.secondRound = false }
   return {
-    id: uid(), projectId: opts.projectId, type: opts.type, title: opts.title, sourceProblem: opts.sourceProblem,
+    id: uid(), projectId: opts.projectId, type: opts.template.id, template: structuredClone(opts.template), title: opts.title,
+    sourceProblem: opts.sourceProblem, sourceFields: opts.sourceFields, refOptions: opts.refOptions,
     settings, phase: 'lobby', phaseStartedAt: opts.now, deadline: deadlineFor(settings, 'lobby', opts.now),
     participants: [], cards: [], criteria: [], calibration: [], approvals: [], finalists: [], ratings: [], bases: [],
     submitted: {}, args: [], decisions: [], mergeSuggestions: [], calibRevealed: false,
@@ -44,6 +49,18 @@ function deadlineFor(s: Settings, phase: Phase, now: number): number | undefined
 // Авторы карточки вместе с авторами склеенных в неё карточек
 export function cardAuthors(c: Card): string[] {
   return [...new Set([...c.authorIds, ...c.mergedFrom.flatMap(m => m.authorIds)])]
+}
+
+// Старые этапы (до конструктора) хранили только тип «problem» / «idea»
+export function migrateStage(s: Stage): Stage {
+  if (s.template) return s
+  const t = builtinTemplate(s.type) ?? builtinTemplate('problem')!
+  return {...s, template: structuredClone(t)}
+}
+
+export function cardLabel(s: Stage, cardId: string): string {
+  const c = s.cards.find(x => x.id === cardId)
+  return c ? cardTitle(s.template, c.fields) : cardId
 }
 
 export function realCards(stage: Stage): Card[] {
@@ -73,7 +90,7 @@ export function submittedCount(stage: Stage, phase: Phase = stage.phase): number
 export type Action =
   // участники
   | {type: 'hello'; name: string}
-  | {type: 'card.upsert'; id: string; fields: Record<string, string>; basis?: Basis}
+  | {type: 'card.upsert'; id: string; fields: Record<string, FieldValue>; basis?: Basis}
   | {type: 'card.delete'; id: string}
   | {type: 'merge.suggest'; a: string; b: string}
   | {type: 'criterion.propose'; name: string; question: string; anchors: {1: string; 3?: string; 5: string}; tag?: Tag; libraryKey?: string}
@@ -132,7 +149,7 @@ function enterPhase(s: Stage, phase: Phase, now: number) {
   s.phaseStartedAt = now
   s.deadline = deadlineFor(s.settings, phase, now)
   if (phase === 'criteria' && s.criteria.length === 0) {
-    s.criteria = DEFAULT_CRITERIA[s.type].map(k => fromLibrary(k, uid()))
+    s.criteria = s.template.defaultCriteria.map(k => fromLibrary(k, uid()))
   }
   if (phase === 'calibrate') {
     s.calibrationCardId = realCards(s)[0]?.id
@@ -176,7 +193,8 @@ export function reduce(stage: Stage, action: Action, actor: string, isHost: bool
       if (!me) fail('Сначала войдите в комнату')
       if (s.phase !== 'generate' && s.phase !== 'lobby') fail('Добавлять карточки можно только на шаге генерации')
       const existing = s.cards.find(c => c.id === action.id)
-      const fields = Object.fromEntries(Object.entries(action.fields).map(([k, v]) => [k, String(v).slice(0, 600)]))
+      const {values: fields, errors} = validateCard(s.template, action.fields ?? {})
+      if (errors.length) fail(errors[0])
       if (existing) {
         if (!existing.authorIds.includes(actor)) fail('Это не ваша карточка')
         existing.fields = fields
@@ -416,10 +434,10 @@ export function canAdvance(s: Stage): string | null {
 
 export interface PublicCard {
   id: string
-  fields: Record<string, string>
+  fields: Record<string, FieldValue>
   authorIds?: string[]
   authorAliases?: string[]
-  mergedTexts: Record<string, string>[]
+  mergedTexts: Record<string, FieldValue>[]
   mergedIds: string[]
 }
 
@@ -427,6 +445,9 @@ export interface PublicView {
   stageId: string
   projectId: string
   type: StageType
+  template: StageTemplate
+  sourceFields?: Record<string, FieldValue>
+  refOptions?: {id: string; title: string}[]
   title: string
   sourceProblem?: string
   settings: Settings
@@ -475,7 +496,8 @@ export function publicView(s: Stage, now: number): PublicView {
   const progress = Object.fromEntries(s.participants.map(p => [p.id, submitted.has(p.id)]))
   const calibCard = s.cards.find(c => c.id === s.calibrationCardId)
   return {
-    stageId: s.id, projectId: s.projectId, type: s.type, title: s.title, sourceProblem: s.sourceProblem,
+    stageId: s.id, projectId: s.projectId, type: s.type, template: s.template, sourceFields: s.sourceFields, refOptions: s.refOptions,
+    title: s.title, sourceProblem: s.sourceProblem,
     settings: s.settings, phase: s.phase, flow: phaseFlow(s), deadline: s.deadline, hostTime: now, version: s.version,
     participants: s.participants.map(p => ({id: p.id, name: p.name, alias: p.alias, active: p.active})),
     cardCounts,

@@ -1,5 +1,6 @@
 import {describe, expect, it} from 'vitest'
 import {createStage} from '../core/engine'
+import {builtinTemplate} from '../core/template'
 import {importKey, randomBytes} from './crypto'
 import {ClientSession, HostSession} from './session'
 import {MemoryTransport} from './transport'
@@ -9,7 +10,7 @@ const wait = (ms: number) => new Promise(r => setTimeout(r, ms))
 describe('session over lossy transport', () => {
   it('participants join, submit cards and receive blind state', async () => {
     const key = await importKey(randomBytes(32))
-    const stage = createStage({projectId: 'p', type: 'problem', title: 't', settings: {timePreset: 'none'}, now: Date.now()})
+    const stage = createStage({projectId: 'p', template: builtinTemplate('problem')!, title: 't', settings: {timePreset: 'none'}, now: Date.now()})
     const host = new HostSession(stage, () => {}, new MemoryTransport('room1', {dropRate: 0.3}), key)
     await host.start()
     const clients = ['a', 'b', 'c'].map(id => new ClientSession(id, new MemoryTransport('room1', {dropRate: 0.3}), key))
@@ -39,7 +40,7 @@ describe('session over lossy transport', () => {
   it('wrong key cannot read the room', async () => {
     const key = await importKey(randomBytes(32))
     const other = await importKey(randomBytes(32))
-    const host = new HostSession(createStage({projectId: 'p', type: 'idea', title: 't', now: Date.now()}), () => {}, new MemoryTransport('room2'), key)
+    const host = new HostSession(createStage({projectId: 'p', template: builtinTemplate('idea')!, title: 't', now: Date.now()}), () => {}, new MemoryTransport('room2'), key)
     await host.start()
     const intruder = new ClientSession('x', new MemoryTransport('room2'), other)
     void intruder.start('x')

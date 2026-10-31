@@ -1,12 +1,13 @@
 // Экран участника. Используется на телефоне, в «Моём голосе» организатора и в режиме «Один экран».
 import {useEffect, useMemo, useState} from 'preact/hooks'
 import type {Action, PublicCard, PublicView} from '../core/engine'
-import {CARD_FIELDS, LIBRARY, cardTitle} from '../core/library'
-import {lintCard} from '../core/lint'
+import {libraryFor} from '../core/library'
+import {cardTitle, lintCard, prefillValues, validateCard, type FieldValue} from '../core/template'
 import {BASIS_LABEL, type Basis, type Score} from '../core/types'
 import {lsGet, lsSet} from '../store/db'
 import {AnchorLine, Anchors, Avatars, CardBody, ErrorLine, PhaseIntro, ScoreButtons, Waiting, plural} from './common'
 import {toast} from './toast'
+import {CardForm} from './cardform'
 import {ResultsView, SummaryView} from './results'
 
 export type Send = (a: Action) => Promise<string | null>
@@ -20,7 +21,7 @@ interface Props {
 
 interface LocalCard {
   id: string
-  fields: Record<string, string>
+  fields: Record<string, FieldValue>
   basis?: Basis
   sent: boolean
 }
@@ -100,25 +101,26 @@ export function ParticipantStage({view, pid, send, storeKey}: Props) {
 type StepProps = {view: PublicView; local: Local; update: (f: (l: Local) => Local) => void; send: Send; pid: string}
 
 function Generate({view, local, update, send}: StepProps) {
-  const fields = CARD_FIELDS[view.type]
+  const tpl = view.template
   const [editing, setEditing] = useState<LocalCard | null>(null)
-  const [showOptional, setShowOptional] = useState(false)
+  const [formKey, setFormKey] = useState(0)
   const [err, setErr] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const limit = view.settings.cardLimit
   const sentCount = local.cards.filter(c => c.sent).length
   const unsent = local.cards.filter(c => !c.sent)
 
-  const draft = editing ?? {id: '', fields: view.type === 'idea' && view.sourceProblem ? {} : {}, sent: false}
+  // Новая карточка сразу получает подстановку из выбранной карточки прошлого этапа
+  const blank = (): LocalCard => ({id: newId(), fields: prefillValues(tpl, view.sourceFields), sent: false})
+  const draft = editing ?? blank()
   // Обновляем от предыдущего состояния: при автозаполнении несколько полей меняются подряд
-  const blank = (): LocalCard => ({id: newId(), fields: {}, sent: false})
-  const setField = (k: string, v: string) => setEditing(prev => {
+  const setField = (k: string, v: FieldValue) => setEditing(prev => {
     const d = prev ?? blank()
     return {...d, fields: {...d.fields, [k]: v}}
   })
-  const hints = lintCard(view.type, draft.fields)
-  const missing = fields.filter(f => f.required && !draft.fields[f.key]?.trim())
-  const canSave = missing.length === 0 && !!draft.basis
+  const hints = lintCard(tpl, draft.fields)
+  const check = validateCard(tpl, draft.fields)
+  const canSave = check.errors.length === 0 && (!tpl.askBasis || !!draft.basis)
 
   // Повторная отправка карточек, которые не дошли (например, после обрыва связи)
   useEffect(() => {
@@ -137,7 +139,7 @@ function Generate({view, local, update, send}: StepProps) {
 
   const save = async () => {
     if (!editing) return
-    const card = {...editing, sent: false}
+    const card = {...editing, fields: validateCard(tpl, editing.fields).values, sent: false}
     update(l => ({...l, cards: l.cards.some(c => c.id === card.id) ? l.cards.map(c => (c.id === card.id ? card : c)) : [...l.cards, card]}))
     setBusy(true)
     const r = await send({type: 'card.upsert', id: card.id, fields: card.fields, basis: card.basis})
@@ -146,7 +148,7 @@ function Generate({view, local, update, send}: StepProps) {
     if (!r) {
       update(l => ({...l, cards: l.cards.map(c => (c.id === card.id ? {...c, sent: true} : c))}))
       setEditing(null)
-      setShowOptional(false)
+      setFormKey(k => k + 1)
       toast('Карточка отправлена')
     } else if (r.startsWith('Лимит')) {
       update(l => ({...l, cards: l.cards.filter(c => c.id !== card.id || c.sent)}))
@@ -162,19 +164,19 @@ function Generate({view, local, update, send}: StepProps) {
   const others = Object.entries(view.cardCounts).reduce((a, [, n]) => a + n, 0) - sentCount
   return (
     <div class="stack">
-      <PhaseIntro emoji="🤫" title={view.type === 'idea' ? 'Ваши идеи' : 'Ваши проблемы'}>
-        Пишите сами, не советуясь. До {plural(limit, 'карточки', 'карточек', 'карточек')}.
+      <PhaseIntro emoji="🤫" title={`${tpl.emoji} ${tpl.name}: ваши карточки`}>
+        {tpl.intro ? `${tpl.intro} ` : ''}Пишите сами, не советуясь. До {plural(limit, 'карточки', 'карточек', 'карточек')}.
       </PhaseIntro>
-      {view.sourceProblem && <div class="note"><b>Решаем проблему:</b> {view.sourceProblem}</div>}
+      {view.sourceProblem && <div class="note"><b>Исходим из:</b> {view.sourceProblem}</div>}
       <div class="stagger stack">
       {local.cards.map(c => (
         <div class="card" key={c.id}>
           <div class="row between">
-            <div style={{flex: 1}}><b>{cardTitle(view.type, c.fields)}</b></div>
+            <div style={{flex: 1}}><b>{cardTitle(view.template, c.fields)}</b></div>
             <span class={`chip ${c.sent ? 'ok' : 'warn'}`}>{c.sent ? 'отправлено' : 'отправляется…'}</span>
           </div>
           <div class="row" style={{marginTop: 8}}>
-            <button class="small" onClick={() => setEditing(c)}>Изменить</button>
+            <button class="small" onClick={() => { setEditing(c); setFormKey(k => k + 1) }}>Изменить</button>
             <button class="small danger" onClick={() => remove(c)}>Удалить</button>
           </div>
         </div>
@@ -190,19 +192,8 @@ function Generate({view, local, update, send}: StepProps) {
       {(editing || local.cards.length < limit) && (
         <div class="card stack">
           <h3>{editing && local.cards.some(c => c.id === editing.id) ? 'Редактирование' : `Новая карточка (${local.cards.length + 1} из ${limit})`}</h3>
-          {fields.filter(f => f.required || showOptional || draft.fields[f.key]).map(f => (
-            <label class="field" key={f.key}>
-              <span>{f.label}{f.required ? ' *' : ''}</span>
-              {f.multiline
-                ? <textarea placeholder={f.hint} value={draft.fields[f.key] ?? ''} maxLength={600} onInput={e => setField(f.key, (e.target as HTMLTextAreaElement).value)} />
-                : <input type="text" placeholder={f.hint} value={draft.fields[f.key] ?? ''} maxLength={200} onInput={e => setField(f.key, (e.target as HTMLInputElement).value)} />}
-            </label>
-          ))}
-          {!showOptional && fields.some(f => !f.required && !draft.fields[f.key]) && (
-            <button type="button" class="ghost small" style={{alignSelf: 'flex-start'}} onClick={() => setShowOptional(true)}>
-              + {fields.filter(f => !f.required).map(f => f.label.toLowerCase()).join(', ')}
-            </button>
-          )}
+          <CardForm key={formKey} tpl={tpl} values={draft.fields} onChange={setField} refOptions={view.refOptions} />
+          {tpl.askBasis && (
           <div>
             <div class="small" style={{fontWeight: 700, marginBottom: 6}}>Откуда мы это знаем?</div>
             <div class="row">
@@ -212,13 +203,14 @@ function Generate({view, local, update, send}: StepProps) {
               ))}
             </div>
           </div>
+          )}
           {hints.map(h => <div class="hint" key={h}>💡 {h}</div>)}
           <ErrorLine msg={err} />
           <div class="row">
             <button class="primary" disabled={!canSave || busy} onClick={save}>{busy ? 'Отправляем…' : 'Сохранить карточку'}</button>
-            {editing && <button class="ghost" onClick={() => { setEditing(null); setErr(null) }}>Отмена</button>}
+            {editing && <button class="ghost" onClick={() => { setEditing(null); setErr(null); setFormKey(k => k + 1) }}>Отмена</button>}
           </div>
-          {!canSave && <div class="tiny muted">Заполните поля со звёздочкой и отметьте, откуда это известно.</div>}
+          {!canSave && editing && <div class="tiny muted">{check.errors[0] ?? 'Отметьте, откуда это известно.'}</div>}
         </div>
       )}
       <div class="muted small">У остальных уже {plural(Math.max(0, others), 'карточка', 'карточки', 'карточек')}.</div>
@@ -242,7 +234,7 @@ function MergeView({view, send, isMine}: {view: PublicView; send: Send; isMine: 
       {view.cards.map(c => (
         <div class="card" key={c.id} style={pick === c.id ? {outline: '2px solid var(--accent)'} : undefined}>
           <div class="row between" style={{alignItems: 'flex-start'}}>
-            <div style={{flex: 1}}><CardBody type={view.type} card={c} full /></div>
+            <div style={{flex: 1}}><CardBody tpl={view.template} refOptions={view.refOptions} card={c} full /></div>
             {isMine(c) && <span class="chip accent">ваша</span>}
           </div>
           <div style={{marginTop: 8}}>
@@ -261,7 +253,7 @@ function CriteriaPropose({view, send}: {view: PublicView; send: Send}) {
   const [custom, setCustom] = useState({name: '', question: '', a1: '', a3: '', a5: ''})
   const [open, setOpen] = useState(false)
   const present = new Set(view.criteria.map(c => c.fromLibrary).filter(Boolean))
-  const lib = LIBRARY.filter(l => l.for === view.type && !present.has(l.key))
+  const lib = libraryFor(view.template.kind).filter(l => !present.has(l.key))
   const propose = async (a: Action) => {
     const r = await send(a)
     setErr(r)
@@ -330,7 +322,7 @@ function Calibrate({view, local, update, send, pid}: StepProps) {
   return (
     <div class="stack">
       <PhaseIntro emoji="🎚️" title="Сверяем шкалы">Оцените пробную карточку — это не идёт в итог.</PhaseIntro>
-      <div class="card"><CardBody type={view.type} card={view.calibrationCard} full /></div>
+      <div class="card"><CardBody tpl={view.template} refOptions={view.refOptions} card={view.calibrationCard} full /></div>
       {view.calibration ? (
         <div class="card stack">
           <h3>Как оценили все</h3>
@@ -386,7 +378,7 @@ function Shortlist({view, local, update, send, pid, isMine}: StepProps & {isMine
       {view.cards.map(c => (
         <div class="card" key={c.id} onClick={() => toggle(c.id)} style={{cursor: 'pointer', ...(chosen.includes(c.id) ? {outline: '2px solid var(--accent)'} : {})}}>
           <div class="row between" style={{alignItems: 'flex-start'}}>
-            <div style={{flex: 1}}><CardBody type={view.type} card={c} /></div>
+            <div style={{flex: 1}}><CardBody tpl={view.template} refOptions={view.refOptions} card={c} /></div>
             <div class="row">{isMine(c) && <span class="chip accent">ваша</span>}<span class="chip">{chosen.includes(c.id) ? '✓ отмечено' : 'отметить'}</span></div>
           </div>
         </div>
@@ -460,7 +452,7 @@ function Rate({view, local, update, send, pid, round, isMine}: StepProps & {roun
       </div>
       <div class="card">
         <div class="row between" style={{alignItems: 'flex-start'}}>
-          <div style={{flex: 1}}><CardBody type={view.type} card={card} full /></div>
+          <div style={{flex: 1}}><CardBody tpl={view.template} refOptions={view.refOptions} card={card} full /></div>
           {isMine(card) && <span class="chip accent">ваша</span>}
         </div>
       </div>
