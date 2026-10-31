@@ -612,3 +612,15 @@ details.menu > summary::-webkit-details-marker { display: none; }
 details.menu[open] > summary { background: var(--surface-2); }
 .menu-panel { position: absolute; right: 0; top: calc(100% + 4px); z-index: 20; display: flex; flex-direction: column; align-items: stretch; gap: 2px; min-width: 250px; padding: 6px; background: var(--surface); border-radius: var(--radius-sm); box-shadow: var(--shadow-lift); }
 .menu-panel button { justify-content: flex-start; text-align: left; }
+
+/* «Что дальше?» */
+.next-group { display: flex; flex-direction: column; gap: 6px; }
+.next-label { font-size: .78rem; font-weight: 800; text-transform: uppercase; letter-spacing: .04em; color: var(--violet); }
+.next-label .muted { text-transform: none; letter-spacing: 0; font-weight: 600; }
+.next-option { display: flex; align-items: flex-start; justify-content: flex-start; gap: 12px; text-align: left; height: auto; padding: 10px 14px; border-radius: var(--radius-sm); background: var(--surface-2); border: 1px solid transparent; }
+.next-option:hover { border-color: var(--violet); }
+.next-option.main { background: var(--violet-soft, var(--surface-2)); border-color: var(--violet); }
+.next-option b { display: block; }
+.next-option small { display: block; color: var(--muted); font-weight: 600; }
+.next-emoji { font-size: 1.3rem; line-height: 1.2; }
+.route { font-size: .8rem; }

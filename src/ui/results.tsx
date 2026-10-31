@@ -168,12 +168,13 @@ function Args({view, cardId, send, canArgue}: {view: PublicView; cardId: string;
 
 // ——— Экспорт ———
 
-export function buildMarkdown(view: PublicView, projectTitle: string): string {
+export function buildMarkdown(view: PublicView, projectTitle: string, route: string[] = []): string {
   const res = view.results
   const L: string[] = []
   const crit = view.criteria.filter(c => c.approved)
   L.push(`# ${projectTitle} — ${view.template.name}`, '')
   if (view.sourceProblem) L.push(`**Исходим из:** ${view.sourceProblem}`, '')
+  if (route.length > 1) L.push('## Как мы пришли к решению', '', ...route.map((r, i) => `${i + 1}. ${r}`), '')
   if (passportFilled(view.passport)) L.push(passportMarkdown(view.passport!), '')
   L.push(`Участников: ${view.participants.filter(p => p.active).length}. Критерии: ${crit.map(c => `${c.name}${c.weight > 1 ? ` (вес ${c.weight})` : ''}`).join(', ')}.`, '')
   const title = (id: string) => {
@@ -298,8 +299,8 @@ export function buildLeanCanvas(view: PublicView): string | null {
   return L.join('\n')
 }
 
-export function SummaryView({view, projectTitle, extra}: {view: PublicView; projectTitle: string; extra?: preact.ComponentChildren}) {
-  const md = buildMarkdown(view, projectTitle)
+export function SummaryView({view, projectTitle, extra, route}: {view: PublicView; projectTitle: string; extra?: preact.ComponentChildren; route?: string[]}) {
+  const md = buildMarkdown(view, projectTitle, route)
   const lean = buildLeanCanvas(view)
   const [copied, setCopied] = useState('')
   const copy = async (text: string, what: string) => {

@@ -7,6 +7,7 @@ import type {StageTemplate, Workflow} from '../core/template'
 import type {Passport} from '../core/passport'
 import type {Assumption, Experiment} from '../core/assume'
 import type {Task} from '../core/tasks'
+import type {PathStep} from '../core/route'
 
 export interface RoomInfo {
   roomId: string
@@ -23,6 +24,8 @@ export interface StoredProject extends Project {
   assumptions?: Assumption[]
   experiments?: Experiment[]
   tasks?: Task[]
+  // Как этапы связаны между собой: «Что дальше?» → выбранный путь
+  path?: PathStep[]
 }
 
 const store = typeof indexedDB !== 'undefined' ? createStore('prioritize-ideas', 'projects') : undefined

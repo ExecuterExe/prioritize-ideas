@@ -24,6 +24,8 @@ import {EMPTY_PASSPORT, passportFilled, type Passport} from '../core/passport'
 import {AssumptionsPanel} from './assumptions'
 import {ThreatNote} from './results'
 import {FREE_TEMPLATES, FULL_SETTINGS, GOALS, QUICK_SETTINGS, goalOf, goalWorkflow, visibleTools} from '../core/quickstart'
+import {planBranch, routeChain, type PathChoice, type PathStep} from '../core/route'
+import {WhatNextSheet} from './whatnext'
 
 declare const __SINGLE__: boolean
 
@@ -46,6 +48,8 @@ export function Brand() {
 }
 
 const BLIND_PHASES = new Set(['generate', 'evolve', 'calibrate', 'shortlist', 'rate', 'rate2'])
+// Где уместна развилка «Что дальше?»: результаты уже видны
+const WHAT_NEXT_PHASES = ['results', 'decide', 'board', 'summary']
 
 export function HostApp() {
   const [projects, setProjects] = useState<StoredProject[] | null>(null)
@@ -69,7 +73,8 @@ export function HostApp() {
   if (openId && stageId) {
     return <StageScreen key={stageId} projectId={openId} stageId={stageId}
       onExit={() => { setOpenId(null); setStageId(null); void refresh() }}
-      onNextStage={(p, fromStageId) => { setOpenId(null); setStageId(null); setCreating({project: p, fromStageId}) }} />
+      onNextStage={(p, fromStageId) => { setOpenId(null); setStageId(null); setCreating({project: p, fromStageId}) }}
+      onOpenStage={(p, s) => { setOpenId(p.id); setStageId(s) }} />
   }
   if (templatesOpen) return <TemplatesPage onBack={() => setTemplatesOpen(false)} />
   if (creating && !creating.project) {
@@ -136,6 +141,7 @@ function Home({projects, onOpen, onNew, onNewStage, onChanged, onTemplates}: {
             <span class="tiny muted">{new Date(p.updatedAt).toLocaleString('ru-RU')}</span>
           </div>
           {p.workflow && <div class="tiny muted">Сценарий «{p.workflow.name}»</div>}
+          {(p.path?.length ?? 0) > 0 && <div class="tiny muted route">Путь: {routeChain(p.stages, p.path).join(' → ')}</div>}
           {p.stages.map(s => (
             <div class="row between stage-row" key={s.id}>
               <div>
@@ -181,7 +187,10 @@ function priorCards(p?: StoredProject) {
 type StageOpts = Omit<Parameters<typeof createStage>[0], 'projectId' | 'now' | 'passport' | 'assumptions' | 'experiments' | 'tasks'>
 
 // Создаёт проект (если его ещё нет) и этап в нём; паспорт и реестры переходят из проекта
-async function launchStage(p: StoredProject | undefined, base: {title: string; hostName: string; mode: 'network' | 'single'; workflow?: Workflow; passport?: Passport}, opts: StageOpts) {
+async function launchStage(p: StoredProject | undefined, base: {
+  title: string; hostName: string; mode: 'network' | 'single'; workflow?: Workflow; passport?: Passport
+  path?: Omit<PathStep, 'stageId' | 'at'>
+}, opts: StageOpts) {
   const now = Date.now()
   const project: StoredProject = p ?? {
     id: uid(), title: base.title.trim(), createdAt: now, updatedAt: now, stages: [], snapshots: [], rooms: {},
@@ -193,6 +202,7 @@ async function launchStage(p: StoredProject | undefined, base: {title: string; h
     assumptions: project.assumptions, experiments: project.experiments, tasks: project.tasks
   })
   let next = withStage({...project, title: base.title.trim(), hostName: base.hostName.trim(), mode: base.mode}, s)
+  if (base.path) next = {...next, path: [...(next.path ?? []), {...base.path, stageId: s.id, at: now}]}
   // Одна комната на проект: участники остаются подключены и сами переходят в новый этап
   const prevRoom = Object.values(next.rooms).at(-1)
   if (base.mode === 'network') next = {...next, rooms: {...next.rooms, [s.id]: prevRoom ?? {roomId: toB64u(randomBytes(12)), key: toB64u(randomBytes(32))}}}
@@ -385,7 +395,8 @@ function NewStage({init, prefill, onCancel, onCreated}: {
 
   const create = async () => {
     if (!tpl) return
-    const {project, stage} = await launchStage(p, {title: projectTitle, hostName, mode, workflow, passport}, {
+    const path = p && init.fromStageId ? {fromStageId: init.fromStageId, choice: 'continue' as const} : undefined
+    const {project, stage} = await launchStage(p, {title: projectTitle, hostName, mode, workflow, passport, path}, {
       template: tpl, settings,
       title: title.trim() || tpl.name,
       sourceProblem: sourceProblem.trim() || undefined,
@@ -555,7 +566,10 @@ function useWakeLock(active: boolean) {
   }, [active])
 }
 
-function StageScreen({projectId, stageId, onExit, onNextStage}: {projectId: string; stageId: string; onExit: () => void; onNextStage: (p: StoredProject, fromStageId: string) => void}) {
+function StageScreen({projectId, stageId, onExit, onNextStage, onOpenStage}: {
+  projectId: string; stageId: string; onExit: () => void; onNextStage: (p: StoredProject, fromStageId: string) => void
+  onOpenStage: (p: StoredProject, stageId: string) => void
+}) {
   const [project, setProject] = useState<StoredProject | null>(null)
   const [session, setSession] = useState<HostSession | null>(null)
   const [transport, setTransport] = useState<NostrTransport | null>(null)
@@ -611,14 +625,36 @@ function StageScreen({projectId, stageId, onExit, onNextStage}: {projectId: stri
   useWakeLock(!!session)
 
   if (!project || !session) return <div class="wrap">Загрузка…</div>
-  return <StageUI project={project} session={session} transport={transport} joinUrl={joinUrl} onExit={onExit} onNextStage={onNextStage} />
+  // «Другой путь»: новый этап в том же проекте и комнате, текущий остаётся со всеми оценками
+  const branch = async (choice: PathChoice) => {
+    const cur = session.stage.value
+    const plan = planBranch(cur, choice)
+    if (!plan) return
+    clearTimeout(saveTimer.current)
+    const p0 = withStage(projectRef.current!, cur)
+    let {project: next, stage} = await launchStage(p0, {title: p0.title, hostName: p0.hostName, mode: p0.mode, workflow: p0.workflow, path: {fromStageId: cur.id, choice}}, {
+      template: plan.template, title: plan.title, settings: {...cur.settings},
+      sourceProblem: plan.sourceProblem, sourceFields: plan.sourceFields, seedCards: plan.seedCards, seedCriteria: plan.seedCriteria, persona: plan.persona
+    })
+    // На одном экране участники не входят сами — переносим команду в новый этап
+    if (p0.mode === 'single') {
+      stage.participants = cur.participants.filter(x => x.active).map(x => ({...x}))
+      next = withStage(next, stage)
+      await saveProject(next)
+    }
+    projectRef.current = next
+    toast('Новый этап готов — прошлый со всеми оценками остался в проекте')
+    onOpenStage(next, stage.id)
+  }
+
+  return <StageUI project={project} session={session} transport={transport} joinUrl={joinUrl} onExit={onExit} onNextStage={onNextStage} onBranch={branch} />
 }
 
 type Tab = 'panel' | 'me' | 'assume' | 'tasks' | 'diag'
 
-function StageUI({project, session, transport, joinUrl, onExit, onNextStage}: {
+function StageUI({project, session, transport, joinUrl, onExit, onNextStage, onBranch}: {
   project: StoredProject; session: HostSession; transport: NostrTransport | null; joinUrl: string
-  onExit: () => void; onNextStage: (p: StoredProject, fromStageId: string) => void
+  onExit: () => void; onNextStage: (p: StoredProject, fromStageId: string) => void; onBranch: (c: PathChoice) => Promise<void>
 }) {
   const view = session.view.value
   const stage = session.stage.value
@@ -626,6 +662,7 @@ function StageUI({project, session, transport, joinUrl, onExit, onNextStage}: {
   const [tab, setTab] = useState<Tab>('panel')
   const [projector, setProjector] = useState(false)
   const [editPassport, setEditPassport] = useState(false)
+  const [whatNext, setWhatNext] = useState(false)
   const [err, setErr] = useState<string | null>(null)
   const hostPid = project.hostPid
 
@@ -674,6 +711,9 @@ function StageUI({project, session, transport, joinUrl, onExit, onNextStage}: {
           {!single && <span title={`Связь: ${session.netStatus.value === 'online' ? 'отличная' : session.netStatus.value === 'degraded' ? 'слабая' : 'нет'}`}><span class={`dot ${session.netStatus.value}`} /></span>}
           {view.canGoBack && <button class="ghost icon-btn no-print" title="Вернуться на шаг назад" aria-label="Назад" onClick={() => host({type: 'phase.back'})}>↶</button>}
           {view.advanceBlock && view.phase !== 'summary' && <span class="block-hint no-print">{view.advanceBlock}</span>}
+          {WHAT_NEXT_PHASES.includes(view.phase) && (
+            <button class={`${view.phase === 'summary' ? 'primary' : 'ghost'} next-btn no-print`} onClick={() => setWhatNext(true)}>Что дальше?</button>
+          )}
           {view.phase !== 'summary' && (
             <button class="primary next-btn no-print" disabled={!!view.advanceBlock} onClick={next}>
               {view.phase === 'rate' || view.phase === 'rate2' ? 'Раскрыть ✨' : 'Дальше →'}
@@ -682,6 +722,28 @@ function StageUI({project, session, transport, joinUrl, onExit, onNextStage}: {
         </div>
         <div class="inner bar-progress"><PhaseSteps view={view} /></div>
       </div>
+      {whatNext && <WhatNextSheet view={view} stage={stage} project={project} single={single}
+        onClose={() => setWhatNext(false)}
+        onContinue={() => {
+          setWhatNext(false)
+          if (view.phase === 'summary') onNextStage(project, view.stageId)
+          else next()
+        }}
+        onBranch={c => { setWhatNext(false); void onBranch(c) }}
+        onAssume={() => {
+          setWhatNext(false)
+          setTab('assume')
+        }}
+        onBack={() => { setWhatNext(false); host({type: 'phase.back'}) }}
+        onFinish={() => {
+          setWhatNext(false)
+          // Идём к итогам, пока шаги разрешают; если нужен выбор — подсказываем
+          for (let i = 0; i < 4 && session.stage.value.phase !== 'summary'; i++) {
+            const r = session.dispatch({type: 'phase.next'}, hostPid, true)
+            if (r) { toast(r, 'error'); break }
+          }
+        }}
+        asHost={asParticipant(hostPid)} onExit={onExit} />}
       {editPassport && <PassportEditSheet value={view.passport} onClose={() => setEditPassport(false)}
         onSave={pp => { if (!host({type: 'passport.update', passport: pp})) toast('Задание обновлено у всех') }} />}
       <div class="wrap stack">
@@ -844,7 +906,7 @@ function HostPanel({view, stage, host, joinUrl, project, projector, onNextStage}
     case 'decide':
       return <DecidePanel view={view} host={host} />
     case 'summary':
-      return <SummaryView view={view} projectTitle={project.title} extra={
+      return <SummaryView view={view} projectTitle={project.title} route={routeChain(project.stages, project.path)} extra={
         <div class="row no-print">
           <NextStageButton project={project} view={view} onNextStage={onNextStage} />
           <button onClick={() => downloadFile(`${project.title}.json`, JSON.stringify(project, null, 1))}>Сохранить проект в файл</button>

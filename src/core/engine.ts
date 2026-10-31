@@ -35,7 +35,7 @@ export function createStage(opts: {
   projectId: string; template: StageTemplate; title: string; settings?: Partial<Settings>
   sourceProblem?: string; sourceFields?: Record<string, FieldValue>; refOptions?: {id: string; title: string}[]
   passport?: Passport; assumptions?: Assumption[]; experiments?: Experiment[]
-  seedCards?: Record<string, FieldValue>[]; persona?: string; tasks?: Task[]; now: number
+  seedCards?: Record<string, FieldValue>[]; seedCriteria?: Criterion[]; persona?: string; tasks?: Task[]; now: number
 }): Stage {
   const settings = {...DEFAULT_SETTINGS, ...opts.settings}
   if (settings.timePreset === 'express') { settings.calibration = false; settings.secondRound = false; settings.evolve = false }
@@ -54,7 +54,8 @@ export function createStage(opts: {
     // Карточки, перенесённые с прошлого этапа (например, барьеры с карты пути), — без автора
     cards: (opts.seedCards ?? []).map(fields => ({id: uid(), authorIds: [], fields: structuredClone(fields), mergedFrom: [], createdAt: opts.now})),
     journey: isJourney ? emptyJourney(opts.persona ?? opts.passport?.audience ?? '') : undefined,
-    criteria: [], calibration: [], approvals: [], finalists: [], ratings: [], bases: [],
+    // Критерии прошлого раунда (переоценка): сразу утверждены
+    criteria: (opts.seedCriteria ?? []).map(c => ({...structuredClone(c), approved: true})), calibration: [], approvals: [], finalists: [], ratings: [], bases: [],
     submitted: {}, args: [], decisions: [], mergeSuggestions: [], calibRevealed: false,
     disputedForRound2: [], round2Done: false, version: 1, createdAt: opts.now
   }
