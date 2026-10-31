@@ -111,7 +111,7 @@ export function ResultsView({view, send, canArgue, isHost = false, pid}: {view: 
       {axes && (
         <div class="card">
           <h3>Матрица 2×2</h3>
-          <div class="row small" style={{marginBottom: 8}}>
+          <div class="row small no-print" style={{marginBottom: 8}}>
             <span>По горизонтали</span>
             <select style={{width: 'auto'}} value={axes[0]} onChange={e => setAxes([(e.target as HTMLSelectElement).value, axes[1]])}>
               {crit.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}

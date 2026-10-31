@@ -27,6 +27,7 @@ import {FREE_TEMPLATES, FULL_SETTINGS, GOALS, QUICK_SETTINGS, goalOf, goalWorkfl
 import {planBranch, routeChain, type PathChoice, type PathStep} from '../core/route'
 import {WhatNextSheet} from './whatnext'
 import {Pulse} from './pulse'
+import {openScreen, screenSupported, useScreenFeed} from './screen'
 
 declare const __SINGLE__: boolean
 
@@ -670,6 +671,8 @@ function StageUI({project, session, transport, joinUrl, onExit, onNextStage, onB
   const [projector, setProjector] = useState(false)
   const [editPassport, setEditPassport] = useState(false)
   const [whatNext, setWhatNext] = useState(false)
+  // Окно для проектора получает ту же «слепую» картину, что и телефоны
+  useScreenFeed(view, joinUrl, project.title)
   const [err, setErr] = useState<string | null>(null)
   const hostPid = project.hostPid
 
@@ -775,7 +778,8 @@ function StageUI({project, session, transport, joinUrl, onExit, onNextStage, onB
                   </div>
                 </details>
               )}
-              <button class="ghost small" onClick={() => setProjector(true)} title="Крупный шрифт для проектора">⛶ Большой экран</button>
+              {screenSupported && !__SINGLE__ && <button class="ghost small" onClick={openScreen} title="Второе окно: перетащите его на проектор">🖥 Окно для проектора</button>}
+              <button class="ghost small" onClick={() => setProjector(true)} title="Крупный шрифт на этом же экране">⛶ Большой экран</button>
             </span>
           </div>
         )}

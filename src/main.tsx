@@ -4,6 +4,7 @@ import './ui/style.css'
 import {HostApp} from './ui/host'
 import {JoinApp} from './ui/join'
 import {Toaster} from './ui/toast'
+import {ScreenApp} from './ui/screen'
 
 declare const __SINGLE__: boolean
 
@@ -19,6 +20,8 @@ function App() {
     window.addEventListener('hashchange', on)
     return () => window.removeEventListener('hashchange', on)
   }, [])
+  // Окно для проектора: открывается ведущим, только показывает
+  if (location.hash === '#screen' && !__SINGLE__) return <ScreenApp />
   return (
     <>
       {join && !__SINGLE__ ? <JoinApp key={join.roomId} roomId={join.roomId} secret={join.key} /> : <HostApp />}
