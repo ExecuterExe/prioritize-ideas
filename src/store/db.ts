@@ -5,6 +5,7 @@ import type {Project, Stage} from '../core/types'
 import {migrateStage, uid} from '../core/engine'
 import type {StageTemplate, Workflow} from '../core/template'
 import type {Passport} from '../core/passport'
+import type {Assumption, Experiment} from '../core/assume'
 
 export interface RoomInfo {
   roomId: string
@@ -18,6 +19,8 @@ export interface StoredProject extends Project {
   mode: 'network' | 'single'
   workflow?: Workflow
   passport?: Passport
+  assumptions?: Assumption[]
+  experiments?: Experiment[]
 }
 
 const store = typeof indexedDB !== 'undefined' ? createStore('prioritize-ideas', 'projects') : undefined

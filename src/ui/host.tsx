@@ -16,6 +16,8 @@ import {toast} from './toast'
 import {TemplatesPage, allTemplates, useTemplates} from './templates'
 import {ComplianceCheck, PassportButton, PassportEditSheet, PassportEditor, PassportView} from './passport'
 import {EMPTY_PASSPORT, passportFilled, type Passport} from '../core/passport'
+import {AssumptionsPanel} from './assumptions'
+import {ThreatNote} from './results'
 
 declare const __SINGLE__: boolean
 
@@ -213,6 +215,7 @@ function NewStage({init, onCancel, onCreated}: {
     }
     const s = createStage({
       projectId: project.id, template: tpl, now, settings, passport: project.passport,
+      assumptions: project.assumptions, experiments: project.experiments,
       title: title.trim() || tpl.name,
       sourceProblem: sourceProblem.trim() || undefined,
       sourceFields: src?.card.fields,
@@ -388,7 +391,11 @@ function StageScreen({projectId, stageId, onExit, onNextStage}: {projectId: stri
       projectRef.current = p
       setProject(p)
       const persist = (s: Stage) => {
-        projectRef.current = {...withStage(projectRef.current!, s), passport: s.passport ?? projectRef.current!.passport}
+        // Паспорт и реестры живут в проекте и переходят в следующие этапы
+        projectRef.current = {
+          ...withStage(projectRef.current!, s), passport: s.passport ?? projectRef.current!.passport,
+          assumptions: s.assumptions ?? projectRef.current!.assumptions, experiments: s.experiments ?? projectRef.current!.experiments
+        }
         clearTimeout(saveTimer.current)
         saveTimer.current = setTimeout(() => { void saveProject(projectRef.current!); setProject(projectRef.current) }, 300)
       }
@@ -423,7 +430,7 @@ function StageScreen({projectId, stageId, onExit, onNextStage}: {projectId: stri
   return <StageUI project={project} session={session} transport={transport} joinUrl={joinUrl} onExit={onExit} onNextStage={onNextStage} />
 }
 
-type Tab = 'panel' | 'me' | 'diag'
+type Tab = 'panel' | 'me' | 'assume' | 'diag'
 
 function StageUI({project, session, transport, joinUrl, onExit, onNextStage}: {
   project: StoredProject; session: HostSession; transport: NostrTransport | null; joinUrl: string
@@ -495,6 +502,7 @@ function StageUI({project, session, transport, joinUrl, onExit, onNextStage}: {
             <div class="tabs">
               <button class={tab === 'panel' ? 'on' : ''} onClick={() => setTab('panel')}>{single ? 'Сессия' : 'Команда'}</button>
               {!single && <button class={tab === 'me' ? 'on' : ''} onClick={() => setTab('me')}>Мой голос{myTurn ? ' •' : ''}</button>}
+              <button class={tab === 'assume' ? 'on' : ''} onClick={() => setTab('assume')}>🎯 Предположения{view.assumptions.length ? ` (${view.assumptions.length})` : ''}{view.round?.open ? ' •' : ''}</button>
               {!single && <button class={tab === 'diag' ? 'on' : ''} onClick={() => setTab('diag')}>Связь</button>}
             </div>
             <button class="ghost small" onClick={() => setProjector(true)} title="Крупный шрифт для проектора">⛶ Большой экран</button>
@@ -512,6 +520,7 @@ function StageUI({project, session, transport, joinUrl, onExit, onNextStage}: {
             : <HostPanel view={view} stage={stage} host={host} joinUrl={joinUrl} project={project} projector={projector} onNextStage={onNextStage} />)}
           {tab === 'me' && !single && <ParticipantStage view={view} pid={hostPid} send={asParticipant(hostPid)} storeKey={`pi:me:${stage.id}:${hostPid}`} />}
           {tab === 'diag' && transport && <Diagnostics transport={transport} />}
+          {tab === 'assume' && <AssumptionsPanel view={view} send={asParticipant(hostPid)} pid={hostPid} isHost single={single} />}
         </div>
       </div>
     </div>
@@ -812,7 +821,7 @@ function ResultsPanel({view, host}: {view: PublicView; host: (a: Action) => stri
           {view.round2Done && <div class="small muted">Второй раунд проведён — показаны его оценки и изменение разброса.</div>}
         </div>
       )}
-      <ResultsView view={view} canArgue={false} />
+      <ResultsView view={view} canArgue={false} send={a => Promise.resolve(host(a))} />
     </div>
   )
 }
@@ -848,6 +857,7 @@ function DecidePanel({view, host}: {view: PublicView; host: (a: Action) => strin
                 onBlur={() => host({type: 'decision.set', cardId: r.cardId, status: d.status, reason})} />
             )}
             {needReason && !reason.trim() && <div class="hint">Запишите причину — это поможет при защите и при возврате к варианту.</div>}
+            {d?.status === 'chosen' && <ThreatNote view={view} cardId={r.cardId} />}
             {d?.status === 'chosen' && <ComplianceCheck p={view.passport} marks={view.compliance[r.cardId]}
               onSet={(item, v) => host({type: 'compliance.set', cardId: r.cardId, item, value: v})} />}
           </div>

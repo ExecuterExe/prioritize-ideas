@@ -517,3 +517,19 @@ div.field > span { display: block; font-size: .85rem; font-weight: 700; margin-b
 @keyframes sheetUp { from { transform: translateY(40px); opacity: 0; } }
 .compliance { border-top: 1px dashed var(--border); padding-top: 10px; }
 .compliance-row { padding: 4px 0; }
+
+/* ——— Предположения и эксперименты ——— */
+.assumption.leap { border-color: color-mix(in srgb, var(--violet) 55%, var(--border)); box-shadow: 0 0 0 3px color-mix(in srgb, var(--violet) 10%, transparent), var(--shadow); }
+button.mini { min-height: 30px; min-width: 30px; padding: 0; border-radius: 9px; font-weight: 800; font-size: .8rem; color: var(--sc); border-color: color-mix(in srgb, var(--sc) 35%, var(--border)); background: color-mix(in srgb, var(--sc) 7%, var(--surface)); }
+button.mini.on { background: var(--sc); color: #fff; border-color: var(--sc); }
+.small-select { width: auto; padding: 4px 28px 4px 10px; font-size: .82rem; min-height: 34px; }
+.test-card { border: 1px dashed color-mix(in srgb, var(--mint) 60%, var(--border)); border-radius: var(--radius-sm); padding: 12px; background: color-mix(in srgb, var(--mint-soft) 40%, var(--surface)); }
+.test-card-view { border-left: 4px solid var(--mint); }
+.round-card { border: 1px solid color-mix(in srgb, var(--violet) 40%, var(--border)); background: linear-gradient(135deg, var(--surface), color-mix(in srgb, var(--violet-soft) 45%, var(--surface))); }
+.matrix .q-leap { fill: color-mix(in srgb, var(--violet) 10%, transparent); stroke: none; }
+.matrix .q-title { font-size: 11px; font-weight: 700; fill: var(--muted); }
+.matrix .pt-ok { fill: var(--mint) !important; }
+.matrix .pt-bad { fill: var(--bad) !important; }
+.threat { border-radius: var(--radius-sm); padding: 8px 12px; font-size: .88rem; }
+.threat.bad { background: var(--bad-soft); color: var(--bad); font-weight: 700; }
+.threat.warn { background: var(--warn-soft); color: var(--warn); }

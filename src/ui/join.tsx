@@ -10,6 +10,8 @@ import {ErrorLine, PhaseSteps, Timer} from './common'
 import {ParticipantStage} from './participant'
 import {Brand} from './host'
 import {PassportButton} from './passport'
+import {AssumptionsPanel} from './assumptions'
+import {createPortal} from 'preact/compat'
 
 export function JoinApp({roomId, secret}: {roomId: string; secret: string}) {
   const pidKey = `pi:pid:${roomId}`
@@ -23,6 +25,7 @@ export function JoinApp({roomId, secret}: {roomId: string; secret: string}) {
   const [joined, setJoined] = useState(() => lsGet<boolean>(`pi:joined:${roomId}`, false))
   const [session, setSession] = useState<ClientSession | null>(null)
   const [err, setErr] = useState<string | null>(null)
+  const [assumeOpen, setAssumeOpen] = useState(false)
 
   useEffect(() => {
     if (!joined) return
@@ -79,6 +82,7 @@ export function JoinApp({roomId, secret}: {roomId: string; secret: string}) {
             <div class="phase-title">{view ? PHASE_LABEL[view.phase] : 'Ищем организатора…'}</div>
           </div>
           {view && <PassportButton p={view.passport} />}
+          {view && <button class="ghost icon-btn small" title="Предположения" aria-label="Предположения" onClick={() => setAssumeOpen(true)}>🎯</button>}
           {view && <Timer deadline={view.deadline} offset={session!.offset} />}
           <span title="Связь"><span class={`dot ${stale ? 'degraded' : net}`} /></span>
         </div>
@@ -93,6 +97,18 @@ export function JoinApp({roomId, secret}: {roomId: string; secret: string}) {
             <div>Подключаемся к комнате…</div>
             <div class="small muted">Если это длится больше 20 секунд: проверьте, что ноутбук организатора открыт на экране сессии и у обоих есть интернет.</div>
           </div>
+        )}
+        {view?.round?.open && !view.round.submitted.includes(pid) && (
+          <button class="note" style={{justifyContent: 'flex-start', border: 0, width: '100%', fontWeight: 700, borderRadius: 'var(--radius-sm)'}} onClick={() => setAssumeOpen(true)}>🙈 Организатор просит оценить предположения — открыть →</button>
+        )}
+        {assumeOpen && view && session && createPortal(
+          <div class="sheet-backdrop" onClick={() => setAssumeOpen(false)}>
+            <div class="sheet wide" role="dialog" aria-label="Предположения" onClick={e => e.stopPropagation()}>
+              <div class="row between"><h2 style={{margin: 0}}>🎯 Предположения</h2><button class="ghost icon-btn" aria-label="Закрыть" onClick={() => setAssumeOpen(false)}>✕</button></div>
+              <AssumptionsPanel view={view} send={a => session.send(a)} pid={pid} isHost={false} />
+            </div>
+          </div>,
+          document.body
         )}
         {view && session && <ParticipantStage view={view} pid={pid} send={a => session.send(a)} storeKey={`pi:me:${view.stageId}:${pid}`} />}
       </div>

@@ -2,6 +2,7 @@
 
 import type {FieldValue, StageTemplate} from './template'
 import type {ComplianceValue, Passport} from './passport'
+import type {Assumption, AssumptionRound, Experiment} from './assume'
 
 // id шаблона этапа: 'problem', 'idea', 'hypothesis' или свой
 export type StageType = string
@@ -111,6 +112,9 @@ export interface Stage {
   refOptions?: {id: string; title: string}[]
   passport?: Passport
   compliance?: Record<string, Record<string, ComplianceValue>>
+  assumptions?: Assumption[]
+  experiments?: Experiment[]
+  assumptionRound?: AssumptionRound
   settings: Settings
   phase: Phase
   phaseStartedAt: number

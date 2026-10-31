@@ -5,6 +5,8 @@ import {asText, cardSubtitle, cardTitle, formatValue} from '../core/template'
 import {Badges, CardBody, CountUp, Dist, Matrix} from './common'
 import {ComplianceCheck} from './passport'
 import {complianceItems, passportFilled, passportMarkdown} from '../core/passport'
+import {CATEGORY_SHORT, METHOD_LABEL, STATUS_ICON, STATUS_LABEL, threatsFor} from '../core/assume'
+import {toast} from './toast'
 import type {Action} from '../core/engine'
 
 type Send = (a: Action) => Promise<string | null>
@@ -62,6 +64,7 @@ export function ResultsView({view, send, canArgue}: {view: PublicView; send?: Se
                   {decision?.status === 'deferred' && <span class="chip warn">⏸ Отложено</span>}
                   {decision?.status === 'rejected' && <span class="chip bad">✖ Отклонено</span>}
                   <Badges r={r} />
+                  {send && r.guess && <AssumeButton view={view} cardId={r.cardId} send={send} />}
                 </div>
               </div>
               <div class="score-big" style={{fontSize: '1.8rem'}}>{r.score === null ? '—' : <CountUp value={r.score} />}</div>
@@ -184,6 +187,20 @@ export function buildMarkdown(view: PublicView, projectTitle: string): string {
     }
     L.push('')
   }
+  if (view.assumptions.length) {
+    L.push('## Предположения', '', '| № | Предположение | О чём | Важность | Доказанность | Статус | Основание |', '| --- | --- | --- | --- | --- | --- | --- |')
+    view.assumptions.forEach((a, i) => L.push(`| ${i + 1} | ${a.text} | ${CATEGORY_SHORT[a.category]} | ${a.importance ?? '—'} | ${a.evidence ?? '—'} | ${STATUS_ICON[a.status]} ${STATUS_LABEL[a.status]} | ${a.proof ?? ''} |`))
+    L.push('')
+  }
+  if (view.experiments.length) {
+    L.push('## Эксперименты', '')
+    for (const e of view.experiments) {
+      const a = view.assumptions.find(x => x.id === e.assumptionId)
+      const owner = view.participants.find(p => p.id === e.ownerId)?.name
+      L.push(`- **${a?.text ?? '?'}** — ${METHOD_LABEL[e.method]}, N=${e.sampleN}, успех ${e.thresholdKind === 'percent' ? `≥ ${e.threshold}%` : `≥ ${e.threshold} чел.`}${owner ? `, отв. ${owner}` : ''}${e.deadline ? `, срок ${e.deadline}` : ''}${e.resultHits != null ? ` → факт ${e.resultHits} из ${e.resultN}: ${e.verdict ? STATUS_LABEL[e.verdict] : '—'}` : ''}`)
+    }
+    L.push('')
+  }
   const items = complianceItems(view.passport)
   if (items.length && chosen.length) {
     L.push('## Соответствие заданию', '')
@@ -274,6 +291,7 @@ export function SummaryView({view, projectTitle, extra}: {view: PublicView; proj
             <div key={d.cardId} class="card stack" style={{background: 'var(--ok-soft)'}}>
               <CardBody tpl={view.template} refOptions={view.refOptions} card={c} full />
               {d.reason && <div class="small">Почему: {d.reason}</div>}
+              <ThreatNote view={view} cardId={d.cardId} />
               <ComplianceCheck p={view.passport} marks={view.compliance[d.cardId]} readOnly />
             </div>
           ) : null
@@ -297,6 +315,33 @@ export function SummaryView({view, projectTitle, extra}: {view: PublicView; proj
       {copied && <div class="note">{copied}</div>}
       {extra}
       <ResultsView view={view} canArgue={false} />
+    </div>
+  )
+}
+
+// Записать карточку «на догадках» как предположение — уточнить формулировку можно во вкладке «Предположения»
+function AssumeButton({view, cardId, send}: {view: PublicView; cardId: string; send: Send}) {
+  const done = view.assumptions.some(a => a.linkedCardId === cardId)
+  if (done) return <span class="chip accent">🎯 в предположениях</span>
+  const card = view.cards.find(c => c.id === cardId)
+  const title = card ? cardTitle(view.template, card.fields) : ''
+  return (
+    <button class="small ghost" onClick={async () => {
+      const r = await send({type: 'assumption.add', id: Math.random().toString(36).slice(2, 12), text: `Это действительно так: «${title}»`, category: 'desirability', linkedCardId: cardId, linkedTitle: `${view.template.emoji} ${title}`})
+      toast(r ?? 'Записано в предположения — уточните формулировку там', r ? 'error' : 'ok')
+    }}>🎯 Записать как предположение</button>
+  )
+}
+
+// Предупреждения для выбранной концепции: на чём она держится
+export function ThreatNote({view, cardId}: {view: PublicView; cardId: string}) {
+  const t = threatsFor(cardId, view.assumptions)
+  if (!t.linked.length) return null
+  return (
+    <div class="stack" style={{gap: 6}}>
+      {t.refuted.length > 0 && <div class="threat bad">⛔ Под угрозой: опровергнуто {t.refuted.map(a => `«${a.text}»`).join(', ')}</div>}
+      {t.leapUntested.length > 0 && <div class="threat warn">🎯 Держится на непроверенном важном: {t.leapUntested.map(a => `«${a.text}»`).join(', ')}</div>}
+      <div class="tiny muted">Предположения: {t.linked.map(a => `${STATUS_ICON[a.status]} ${a.text}`).join(' · ')}</div>
     </div>
   )
 }

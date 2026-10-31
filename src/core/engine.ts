@@ -6,6 +6,7 @@ import type {
 import {fromLibrary} from './library'
 import {builtinTemplate, cardTitle, validateCard, type FieldValue, type StageTemplate} from './template'
 import type {ComplianceValue, Passport} from './passport'
+import {autoVerdict, roundAverages, type Assumption, type AssumptionCategory, type AssumptionStatus, type Experiment, type ExperimentMethod, type ThresholdKind} from './assume'
 import {approvalQuota, calibrationSpread, computeResults, pickFinalists, type Results} from './math'
 import {criterionReady} from './lint'
 
@@ -28,7 +29,7 @@ export const TIMINGS: Record<'express' | 'standard', Partial<Record<Phase, numbe
 export function createStage(opts: {
   projectId: string; template: StageTemplate; title: string; settings?: Partial<Settings>
   sourceProblem?: string; sourceFields?: Record<string, FieldValue>; refOptions?: {id: string; title: string}[]
-  passport?: Passport; now: number
+  passport?: Passport; assumptions?: Assumption[]; experiments?: Experiment[]; now: number
 }): Stage {
   const settings = {...DEFAULT_SETTINGS, ...opts.settings}
   if (settings.timePreset === 'express') { settings.calibration = false; settings.secondRound = false }
@@ -36,6 +37,7 @@ export function createStage(opts: {
     id: uid(), projectId: opts.projectId, type: opts.template.id, template: structuredClone(opts.template), title: opts.title,
     sourceProblem: opts.sourceProblem, sourceFields: opts.sourceFields, refOptions: opts.refOptions,
     passport: opts.passport ? structuredClone(opts.passport) : undefined, compliance: {},
+    assumptions: structuredClone(opts.assumptions ?? []), experiments: structuredClone(opts.experiments ?? []),
     settings, phase: 'lobby', phaseStartedAt: opts.now, deadline: deadlineFor(settings, 'lobby', opts.now),
     participants: [], cards: [], criteria: [], calibration: [], approvals: [], finalists: [], ratings: [], bases: [],
     submitted: {}, args: [], decisions: [], mergeSuggestions: [], calibRevealed: false,
@@ -122,12 +124,23 @@ export type Action =
   | {type: 'passport.update'; passport: Passport}
   | {type: 'compliance.set'; cardId: string; item: string; value: ComplianceValue | null}
   | {type: 'criterion.addFromPassport'; text: string}
+  | {type: 'assumption.add'; id: string; text: string; category: AssumptionCategory; linkedCardId?: string; linkedTitle?: string}
+  | {type: 'assumption.update'; id: string; patch: Partial<Pick<Assumption, 'text' | 'category' | 'importance' | 'evidence' | 'status' | 'proof' | 'proofLink' | 'linkedCardId' | 'linkedTitle'>>}
+  | {type: 'assumption.delete'; id: string}
+  | {type: 'round.open'; ids?: string[]}
+  | {type: 'round.submit'; votes: {assumptionId: string; importance: number; evidence: number}[]}
+  | {type: 'round.reveal'}
+  | {type: 'round.close'}
+  | {type: 'experiment.add'; id: string; assumptionId: string; method: ExperimentMethod; audience: string; sampleN: number; metric: string; thresholdKind: ThresholdKind; threshold: number; deadline?: string; ownerId?: string}
+  | {type: 'experiment.update'; id: string; patch: Partial<Pick<Experiment, 'method' | 'audience' | 'sampleN' | 'metric' | 'thresholdKind' | 'threshold' | 'deadline' | 'ownerId' | 'note'>>}
+  | {type: 'experiment.result'; id: string; resultN: number; resultHits: number; note?: string; override?: AssumptionStatus; reason?: string}
+  | {type: 'experiment.delete'; id: string}
 
 export const HOST_ONLY = new Set<Action['type']>([
   'phase.next', 'phase.back', 'deadline.extend', 'merge', 'unmerge', 'suggestion.dismiss', 'criterion.addLibrary',
   'criterion.update', 'criterion.remove', 'criterion.addCustom', 'settings.update', 'participant.setActive',
   'participant.add', 'participant.rename', 'calib.reveal', 'round2.start', 'decision.set',
-  'passport.update', 'compliance.set', 'criterion.addFromPassport'
+  'passport.update', 'compliance.set', 'criterion.addFromPassport', 'round.open', 'round.reveal', 'round.close'
 ])
 
 export class ActionError extends Error {}
@@ -409,6 +422,134 @@ export function reduce(stage: Stage, action: Action, actor: string, isHost: bool
       break
     }
 
+    case 'assumption.add': {
+      if (!me && !isHost) fail('Сначала войдите в комнату')
+      const text = action.text.trim().slice(0, 300)
+      if (!text) fail('Сформулируйте предположение')
+      if (!CATEGORIES.includes(action.category)) fail('Неизвестная категория')
+      const list = s.assumptions ?? []
+      if (list.length >= 80) fail('Предположений слишком много — удалите лишние')
+      if (list.some(a => a.id === action.id)) break
+      s.assumptions = [...list, {
+        id: action.id.slice(0, 20), text, category: action.category, status: 'untested', authorId: actor, createdAt: now,
+        linkedCardId: action.linkedCardId?.slice(0, 40), linkedTitle: action.linkedTitle?.slice(0, 200)
+      }]
+      break
+    }
+
+    case 'assumption.update': {
+      const a = (s.assumptions ?? []).find(x => x.id === action.id) ?? fail('Предположение не найдено')
+      if (!isHost && a.authorId !== actor) fail('Изменять может автор или организатор')
+      const p = action.patch
+      if (p.text !== undefined) a.text = String(p.text).trim().slice(0, 300) || a.text
+      if (p.category && CATEGORIES.includes(p.category)) a.category = p.category
+      if (p.importance !== undefined) a.importance = clampScale(p.importance)
+      if (p.evidence !== undefined) a.evidence = clampScale(p.evidence)
+      if (p.status && STATUSES.includes(p.status)) a.status = p.status
+      if (p.proof !== undefined) a.proof = String(p.proof).slice(0, 400) || undefined
+      if (p.proofLink !== undefined) a.proofLink = String(p.proofLink).slice(0, 500) || undefined
+      if (p.linkedCardId !== undefined) { a.linkedCardId = p.linkedCardId || undefined; a.linkedTitle = p.linkedTitle?.slice(0, 200) }
+      break
+    }
+
+    case 'assumption.delete': {
+      const a = (s.assumptions ?? []).find(x => x.id === action.id)
+      if (!a) break
+      if (!isHost && a.authorId !== actor) fail('Удалять может автор или организатор')
+      s.assumptions = (s.assumptions ?? []).filter(x => x !== a)
+      s.experiments = (s.experiments ?? []).filter(e => e.assumptionId !== a.id)
+      break
+    }
+
+    case 'round.open': {
+      const list = s.assumptions ?? []
+      const ids = (action.ids ?? list.filter(a => a.status !== 'confirmed' && a.status !== 'refuted').map(a => a.id))
+        .filter(id => list.some(a => a.id === id))
+      if (!ids.length) fail('Нет предположений для оценки')
+      s.assumptionRound = {open: true, revealed: false, ids, votes: [], submitted: []}
+      break
+    }
+
+    case 'round.submit': {
+      if (!me) fail('Сначала войдите в комнату')
+      const r = s.assumptionRound
+      if (!r || !r.open) fail('Сейчас нет оценки предположений')
+      if (!r) break
+      const votes = action.votes.filter(v => r.ids.includes(v.assumptionId))
+        .map(v => ({raterId: actor, assumptionId: v.assumptionId, importance: clampScale(v.importance)!, evidence: clampScale(v.evidence)!}))
+      if (votes.some(v => !v.importance || !v.evidence) || new Set(votes.map(v => v.assumptionId)).size < r.ids.length) fail('Оцените все предположения')
+      r.votes = r.votes.filter(v => v.raterId !== actor).concat(votes)
+      if (!r.submitted.includes(actor)) r.submitted.push(actor)
+      break
+    }
+
+    case 'round.reveal': {
+      const r = s.assumptionRound ?? fail('Оценка не запущена')
+      if (!r.votes.length) fail('Пока никто не отправил оценки')
+      const avg = roundAverages(r)
+      for (const a of s.assumptions ?? []) {
+        const x = avg[a.id]
+        if (x) { a.importance = x.importance; a.evidence = x.evidence }
+      }
+      r.open = false
+      r.revealed = true
+      break
+    }
+
+    case 'round.close':
+      s.assumptionRound = undefined
+      break
+
+    case 'experiment.add': {
+      if (!me && !isHost) fail('Сначала войдите в комнату')
+      const a = (s.assumptions ?? []).find(x => x.id === action.assumptionId) ?? fail('Сначала выберите предположение')
+      if ((s.experiments ?? []).some(e => e.id === action.id)) break
+      const e = cleanExperiment({...action, authorId: actor, createdAt: now} as Experiment)
+      s.experiments = [...(s.experiments ?? []), e]
+      if (a.status === 'untested') a.status = 'testing'
+      break
+    }
+
+    case 'experiment.update': {
+      const e = (s.experiments ?? []).find(x => x.id === action.id) ?? fail('Эксперимент не найден')
+      if (!isHost && e.authorId !== actor && e.ownerId !== actor) fail('Изменять может автор, ответственный или организатор')
+      Object.assign(e, cleanExperiment({...e, ...action.patch}))
+      break
+    }
+
+    case 'experiment.result': {
+      const e = (s.experiments ?? []).find(x => x.id === action.id) ?? fail('Эксперимент не найден')
+      if (!isHost && e.authorId !== actor && e.ownerId !== actor) fail('Результат вносит автор, ответственный или организатор')
+      const n = Math.round(Number(action.resultN)), hits = Math.round(Number(action.resultHits))
+      if (!(n > 0) || !(hits >= 0) || (e.thresholdKind === 'percent' && hits > n)) fail('Проверьте числа: «из скольких» больше нуля, «сколько подтвердили» не больше общего')
+      e.resultN = n
+      e.resultHits = hits
+      e.note = action.note?.slice(0, 400) || e.note
+      const auto = autoVerdict(e)
+      if (action.override && action.override !== auto) {
+        if (!action.reason?.trim()) fail('Объясните, почему вывод отличается от автоматического')
+        e.verdict = action.override
+        e.manualReason = (action.reason ?? '').trim().slice(0, 300)
+      } else {
+        e.verdict = auto ?? undefined
+        e.manualReason = undefined
+      }
+      const a = (s.assumptions ?? []).find(x => x.id === e.assumptionId)
+      if (a && e.verdict) {
+        a.status = e.verdict
+        a.proof = `${METHOD_NAMES[e.method]}: ${hits} из ${n}${e.note ? ` — ${e.note}` : ''}`
+      }
+      break
+    }
+
+    case 'experiment.delete': {
+      const e = (s.experiments ?? []).find(x => x.id === action.id)
+      if (!e) break
+      if (!isHost && e.authorId !== actor) fail('Удалять может автор или организатор')
+      s.experiments = (s.experiments ?? []).filter(x => x !== e)
+      break
+    }
+
     case 'deadline.extend':
       s.deadline = Math.max(s.deadline ?? now, now) + action.minutes * 60_000
       break
@@ -448,6 +589,30 @@ export function reduce(stage: Stage, action: Action, actor: string, isHost: bool
 function phaseIndex(s: Stage, p: Phase): number {
   const order: Phase[] = ['lobby', 'generate', 'merge', 'criteria', 'calibrate', 'shortlist', 'rate', 'results', 'rate2', 'decide', 'summary']
   return order.indexOf(p)
+}
+
+const CATEGORIES: AssumptionCategory[] = ['desirability', 'feasibility', 'viability']
+const STATUSES: AssumptionStatus[] = ['untested', 'testing', 'confirmed', 'partly', 'refuted', 'insufficient']
+const METHOD_NAMES: Record<ExperimentMethod, string> = {survey: 'Опрос', interview: 'Интервью', landing: 'Лендинг', prototype: 'Прототип', observation: 'Наблюдение', competitors: 'Анализ конкурентов'}
+
+function clampScale(v: unknown): number | undefined {
+  const n = Number(v)
+  return Number.isFinite(n) ? Math.min(5, Math.max(1, Math.round(n * 10) / 10)) : undefined
+}
+
+function cleanExperiment(e: Experiment): Experiment {
+  if (!(e.method in METHOD_NAMES)) fail('Неизвестный метод')
+  const sampleN = Math.round(Number(e.sampleN))
+  const threshold = Number(e.threshold)
+  if (!(sampleN > 0)) fail('Укажите, сколько людей планируете опросить')
+  if (!(threshold > 0)) fail('Укажите порог успеха')
+  if (e.thresholdKind === 'percent' && threshold > 100) fail('Порог в процентах — не больше 100')
+  return {
+    ...e, id: String(e.id).slice(0, 20), audience: String(e.audience ?? '').slice(0, 200), metric: String(e.metric ?? '').slice(0, 200),
+    sampleN, threshold, thresholdKind: e.thresholdKind === 'count' ? 'count' : 'percent',
+    deadline: e.deadline && /^\d{4}-\d{2}-\d{2}$/.test(e.deadline) ? e.deadline : undefined,
+    ownerId: e.ownerId?.slice(0, 40) || undefined
+  }
 }
 
 export function canGoBack(s: Stage): boolean {
@@ -490,6 +655,9 @@ export interface PublicView {
   refOptions?: {id: string; title: string}[]
   passport?: Passport
   compliance: Record<string, Record<string, ComplianceValue>>
+  assumptions: Assumption[]
+  experiments: Experiment[]
+  round?: {open: boolean; revealed: boolean; ids: string[]; submitted: string[]; averages?: ReturnType<typeof roundAverages>}
   title: string
   sourceProblem?: string
   settings: Settings
@@ -540,6 +708,14 @@ export function publicView(s: Stage, now: number): PublicView {
   return {
     stageId: s.id, projectId: s.projectId, type: s.type, template: s.template, sourceFields: s.sourceFields, refOptions: s.refOptions,
     passport: s.passport, compliance: s.compliance ?? {},
+    // Авторство предположений скрыто при анонимности; оценки раунда наружу не уходят — только средние после раскрытия
+    assumptions: (s.assumptions ?? []).map(a => (s.settings.anonymous ? {...a, authorId: ''} : a)),
+    experiments: (s.experiments ?? []).map(e => (s.settings.anonymous ? {...e, authorId: ''} : e)),
+    round: s.assumptionRound && {
+      open: s.assumptionRound.open, revealed: s.assumptionRound.revealed, ids: s.assumptionRound.ids,
+      submitted: s.assumptionRound.submitted,
+      averages: s.assumptionRound.revealed ? roundAverages(s.assumptionRound) : undefined
+    },
     title: s.title, sourceProblem: s.sourceProblem,
     settings: s.settings, phase: s.phase, flow: phaseFlow(s), deadline: s.deadline, hostTime: now, version: s.version,
     participants: s.participants.map(p => ({id: p.id, name: p.name, alias: p.alias, active: p.active})),
