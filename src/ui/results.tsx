@@ -10,6 +10,7 @@ import {toast} from './toast'
 import {GenealogyTree, originLabel} from './evolve'
 import {RISK_STATUS_LABEL, riskRows} from '../core/risk'
 import {ScenariosPanel, scenariosMarkdown} from './scenarios'
+import {BoardPanel, boardMarkdown} from './board'
 import type {Action} from '../core/engine'
 
 type Send = (a: Action) => Promise<string | null>
@@ -220,6 +221,8 @@ export function buildMarkdown(view: PublicView, projectTitle: string): string {
   }
   const sc = scenariosMarkdown(view)
   if (sc) L.push(sc)
+  const bm = boardMarkdown(view)
+  if (bm) L.push(bm)
   const items = complianceItems(view.passport)
   if (items.length && chosen.length) {
     L.push('## Соответствие заданию', '')
@@ -303,6 +306,8 @@ export function SummaryView({view, projectTitle, extra}: {view: PublicView; proj
   return (
     <div class="stack">
       {view.template.kind === 'risk' && view.results && <RiskRegister view={view} />}
+      {view.board && <BoardPanel view={view} />}
+      {chosen.length > 0 && (
       <div class="card">
         <h2>Итог</h2>
         {chosen.map(d => {
@@ -317,6 +322,7 @@ export function SummaryView({view, projectTitle, extra}: {view: PublicView; proj
           ) : null
         })}
       </div>
+      )}
       {lean && (
       <div class="card">
         <div class="row between"><h3>Для Lean Canvas</h3><button class="small" onClick={() => copy(lean, 'Текст для Lean Canvas скопирован')}>Скопировать</button></div>

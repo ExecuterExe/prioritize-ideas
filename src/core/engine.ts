@@ -7,6 +7,7 @@ import {fromLibrary} from './library'
 import {builtinTemplate, cardTitle, validateCard, type FieldValue, type StageTemplate} from './template'
 import type {ComplianceValue, Passport} from './passport'
 import {EVOLVE_LIMIT, assignEvolve, hashKey, type ParentLink} from './evolve'
+import {DEFAULT_BUDGET, checkBoard, componentScores, suggestBuckets, type Board, type BoardCheck, type Bucket} from './board'
 import {robustness, type Fit, type Robustness, type Scenario} from './scenario'
 import {BARRIER_LIMIT, emotionStats, emptyJourney, type EmotionStat, type Journey} from './journey'
 import {autoVerdict, roundAverages, type Assumption, type AssumptionCategory, type AssumptionStatus, type Experiment, type ExperimentMethod, type ThresholdKind} from './assume'
@@ -40,7 +41,7 @@ export function createStage(opts: {
   // Развивать чужие «причины провала» не нужно — их важно собрать независимо
   if (opts.template.kind === 'risk') settings.evolve = false
   const isJourney = opts.template.mode === 'journey'
-  if (isJourney) { settings.evolve = false; settings.calibration = false }
+  if (isJourney || opts.template.mode === 'board') { settings.evolve = false; settings.calibration = false }
   return {
     id: uid(), projectId: opts.projectId, type: opts.template.id, template: structuredClone(opts.template), title: opts.title,
     sourceProblem: opts.sourceProblem, sourceFields: opts.sourceFields, refOptions: opts.refOptions,
@@ -87,6 +88,8 @@ export function realCards(stage: Stage): Card[] {
 // Порядок шагов с учётом настроек
 export function phaseFlow(stage: Stage): Phase[] {
   if (stage.template.mode === 'journey') return ['lobby', 'steps', 'generate', 'shortlist', 'summary']
+  // MVP-доска: оцениваем все компоненты (без отбора), потом раскладываем по корзинам
+  if (stage.template.mode === 'board') return ['lobby', 'generate', 'merge', 'criteria', 'rate', 'results', 'board', 'summary']
   const f: Phase[] = ['lobby', 'generate']
   // «Развитие» имеет смысл, когда есть чужие карточки: минимум 2 карточки и 2 участника
   if (stage.settings.evolve && realCards(stage).length >= 2 && activeParticipants(stage).length >= 2) f.push('evolve')
@@ -123,6 +126,9 @@ export type Action =
   | {type: 'scenario.remove'; id: string}
   | {type: 'scenario.answer'; id: string; answers: Record<string, Fit>}
   | {type: 'scenario.close'; id: string}
+  | {type: 'board.move'; cardIds: string[]; bucket: Bucket}
+  | {type: 'board.deps'; cardId: string; deps: string[]}
+  | {type: 'board.budget'; budget: number}
   | {type: 'card.delete'; id: string}
   | {type: 'merge.suggest'; a: string; b: string}
   | {type: 'card.develop'; id: string; parentId: string; fields: Record<string, FieldValue>; basis?: Basis}
@@ -171,7 +177,8 @@ export const HOST_ONLY = new Set<Action['type']>([
   'criterion.update', 'criterion.remove', 'criterion.addCustom', 'settings.update', 'participant.setActive',
   'participant.add', 'participant.rename', 'calib.reveal', 'round2.start', 'decision.set',
   'passport.update', 'compliance.set', 'criterion.addFromPassport', 'round.open', 'round.reveal', 'round.close',
-  'journey.persona', 'step.add', 'step.update', 'step.remove', 'scenario.add', 'scenario.remove', 'scenario.close'
+  'journey.persona', 'step.add', 'step.update', 'step.remove', 'scenario.add', 'scenario.remove', 'scenario.close',
+  'board.move', 'board.deps', 'board.budget'
 ])
 
 export class ActionError extends Error {}
@@ -216,6 +223,9 @@ function enterPhase(s: Stage, phase: Phase, now: number) {
   if (phase === 'evolve') {
     s.evolveAssign = assignEvolve(realCards(s).filter(c => !c.parents?.length), activeParticipants(s).map(p => p.id))
     s.submitted.evolve = []
+  }
+  if (phase === 'board' && !s.board) {
+    s.board = {buckets: suggestBuckets(componentScores(computeResults(s).cards, s.criteria)), deps: {}, budget: DEFAULT_BUDGET}
   }
   if (phase === 'calibrate') {
     s.calibrationCardId = realCards(s)[0]?.id
@@ -414,6 +424,28 @@ export function reduce(stage: Stage, action: Action, actor: string, isHost: bool
       const sc = (s.scenarios ?? []).find(x => x.id === action.id) ?? fail('Сценарий не найден')
       if (!sc.answers.length) fail('Пока никто не ответил')
       sc.open = false
+      break
+    }
+
+    case 'board.move': {
+      const b = s.board ?? fail('Доска ещё не открыта')
+      if (!['mvp', 'v2', 'later'].includes(action.bucket)) fail('Неизвестная корзина')
+      for (const id of action.cardIds) if (s.cards.some(c => c.id === id)) b.buckets[id] = action.bucket
+      break
+    }
+
+    case 'board.deps': {
+      const b = s.board ?? fail('Доска ещё не открыта')
+      const deps = [...new Set(action.deps)].filter(d => d !== action.cardId && s.cards.some(c => c.id === d))
+      b.deps[action.cardId] = deps
+      break
+    }
+
+    case 'board.budget': {
+      const b = s.board ?? fail('Доска ещё не открыта')
+      const n = Math.round(Number(action.budget) * 2) / 2
+      if (!(n >= 1 && n <= 100)) fail('Бюджет — от 1 до 100 очков')
+      b.budget = n
       break
     }
 
@@ -770,7 +802,7 @@ export function reduce(stage: Stage, action: Action, actor: string, isHost: bool
 }
 
 function phaseIndex(s: Stage, p: Phase): number {
-  const order: Phase[] = ['lobby', 'steps', 'generate', 'evolve', 'merge', 'criteria', 'calibrate', 'shortlist', 'rate', 'results', 'rate2', 'decide', 'summary']
+  const order: Phase[] = ['lobby', 'steps', 'generate', 'evolve', 'merge', 'criteria', 'calibrate', 'shortlist', 'rate', 'results', 'rate2', 'decide', 'board', 'summary']
   return order.indexOf(p)
 }
 
@@ -799,7 +831,7 @@ function cleanExperiment(e: Experiment): Experiment {
 }
 
 export function canGoBack(s: Stage): boolean {
-  return ['generate', 'merge', 'criteria', 'calibrate', 'shortlist', 'decide', 'summary', 'rate2'].includes(s.phase)
+  return ['generate', 'merge', 'criteria', 'calibrate', 'shortlist', 'decide', 'board', 'summary', 'rate2'].includes(s.phase)
 }
 
 // Причина, по которой нельзя идти дальше (или null)
@@ -844,6 +876,7 @@ export interface PublicView {
   passport?: Passport
   compliance: Record<string, Record<string, ComplianceValue>>
   evolveAssign?: Record<string, string[]>
+  board?: Board & {check: BoardCheck; scores: ReturnType<typeof componentScores>}
   scenarios: Omit<Scenario, 'answers'>[]
   robustness?: Robustness
   journey?: {persona: string; steps: Journey['steps']; proposals: Journey['proposals']; stats?: Record<string, EmotionStat>}
@@ -879,7 +912,7 @@ export interface PublicView {
   advanceBlock: string | null
 }
 
-const AFTER_REVEAL: Phase[] = ['results', 'rate2', 'decide', 'summary']
+const AFTER_REVEAL: Phase[] = ['results', 'rate2', 'decide', 'board', 'summary']
 
 export function publicView(s: Stage, now: number): PublicView {
   const alias = (id: string) => s.participants.find(p => p.id === id)?.alias ?? '?'
@@ -905,6 +938,10 @@ export function publicView(s: Stage, now: number): PublicView {
     passport: s.passport, compliance: s.compliance ?? {},
     // Ответы «выдерживает ли условие» — вслепую: наружу только кто ответил и итоговый пересчёт
     scenarios: (s.scenarios ?? []).map(({answers: _a, ...rest}) => rest),
+    board: s.board && (() => {
+      const scores = componentScores(computeResults(s).cards, s.criteria)
+      return {...s.board, scores, check: checkBoard(s.board, scores)}
+    })(),
     robustness: s.scenarios?.length && AFTER_REVEAL.includes(s.phase) ? robustness(s, s.scenarios) : undefined,
     // Эмоции — вслепую: до конца шага барьеров видно только, сколько отметок, средние — потом
     journey: s.journey && {

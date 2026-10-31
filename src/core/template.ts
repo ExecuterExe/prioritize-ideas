@@ -31,7 +31,7 @@ export type LintRule =
   | {rule: 'min-length'; field: string; n: number; text: string}
 
 // Вид шаблона определяет библиотеку критериев и проверки критериев
-export type TemplateKind = 'problem' | 'idea' | 'risk' | 'journey' | 'other'
+export type TemplateKind = 'problem' | 'idea' | 'risk' | 'journey' | 'mvp' | 'other'
 
 export interface StageTemplate {
   id: string
@@ -46,7 +46,7 @@ export interface StageTemplate {
   defaultCriteria: string[]
   matrixAxes?: [string, string] // ключи критериев из библиотеки
   intro?: string
-  mode?: 'decide' | 'journey' // режим этапа: сбор и оценка или карта пути
+  mode?: 'decide' | 'journey' | 'board' // режим этапа: сбор и оценка или карта пути
   builtin?: boolean
   updatedAt?: number
 }
@@ -154,6 +154,18 @@ export const BUILTIN_TEMPLATES: StageTemplate[] = [
     titleField: 'what', subtitleFields: [], lint: [], defaultCriteria: []
   },
   {
+    id: 'mvp', name: 'Компонент продукта', emoji: '🧱', kind: 'mvp', mode: 'board', builtin: true, askBasis: false,
+    intro: 'Из каких частей состоит продукт? Функции, экраны, данные, интеграции, внешние участники.',
+    fields: [
+      {key: 'name', label: 'Компонент', hint: 'очередь на стиральные машины', type: 'text', required: true},
+      {key: 'type', label: 'Что это', type: 'select', required: true, options: ['Функция', 'Интерфейс', 'Данные', 'Интеграция', 'Внешний участник']},
+      {key: 'desc', label: 'Зачем он нужен', hint: 'без него пользователь не сможет…', type: 'text', required: false}
+    ],
+    titleField: 'name', subtitleFields: ['type'], lint: [],
+    defaultCriteria: ['comp-value', 'comp-effort'],
+    matrixAxes: ['comp-effort', 'comp-value']
+  },
+  {
     id: 'trend', name: 'Тренд', emoji: '📈', kind: 'other', builtin: true, askBasis: true,
     intro: 'Какие изменения в мире или технологиях создают новые возможности?',
     fields: [
@@ -173,7 +185,8 @@ export const BUILTIN_WORKFLOWS: Workflow[] = [
   {id: 'hypotheses', name: 'От гипотез', description: 'Идея уже есть — сформулировать и выбрать гипотезы', steps: ['idea', 'hypothesis'], builtin: true},
   {id: 'sprint-lite', name: 'Sprint-lite: от пути пользователя', description: 'Карта пути → барьеры становятся проблемами → идея', steps: ['journey', 'problem', 'idea'], builtin: true},
   {id: 'classic-premortem', name: 'Классика + pre-mortem', description: 'Проблема → идея → «почему мы провалились»', steps: ['problem', 'idea', 'premortem'], builtin: true},
-  {id: 'concept-check', name: 'Проверка концепции', description: 'Концепция уже выбрана — найти, что может её погубить', steps: ['premortem'], builtin: true},
+  {id: 'concept-check', name: 'Проверка концепции', description: 'Концепция выбрана — что может её погубить и каким будет MVP', steps: ['premortem', 'mvp'], builtin: true},
+  {id: 'mvp-only', name: 'MVP-доска', description: 'Разложить выбранную идею на части и собрать минимальную версию', steps: ['mvp'], builtin: true},
   {id: 'trends', name: 'От трендов', description: 'Тренд → проблема → идея', steps: ['trend', 'problem', 'idea'], builtin: true},
   {id: 'problem-only', name: 'Только проблема', description: 'Один этап — выбрать проблему', steps: ['problem'], builtin: true}
 ]

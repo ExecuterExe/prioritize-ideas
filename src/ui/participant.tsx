@@ -9,6 +9,7 @@ import {AnchorLine, Anchors, Avatars, CardBody, ErrorLine, PhaseIntro, ScoreButt
 import {toast} from './toast'
 import {CardForm} from './cardform'
 import {EvolveStep} from './evolve'
+import {BoardPanel} from './board'
 import {JourneyParticipant} from './journey'
 import {hashKey} from '../core/evolve'
 import {ResultsView, SummaryView} from './results'
@@ -103,6 +104,8 @@ export function ParticipantStage({view, pid, send, storeKey, assignKey}: Props) 
           <ResultsView view={view} send={send} canArgue pid={pid} />
         </div>
       )
+    case 'board':
+      return <BoardPanel view={view} />
     case 'summary':
       return <SummaryView view={view} projectTitle={view.title} />
   }

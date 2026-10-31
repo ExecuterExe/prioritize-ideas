@@ -12,6 +12,7 @@ import {HostSession} from '../net/session'
 import {deleteProject, downloadFile, listProjects, loadProject, lsGet, lsSet, saveProject, withStage, type StoredProject} from '../store/db'
 import {Avatar, Avatars, CardBody, ErrorLine, PhaseIntro, PhaseSteps, QR, Ring, Timer, phaseName, plural, stepLabel} from './common'
 import {JourneyHost, JourneySummary, journeyMarkdown} from './journey'
+import {BoardPanel} from './board'
 import {barrierToProblem} from '../core/journey'
 import {ParticipantStage} from './participant'
 import {ResultsView, SummaryView} from './results'
@@ -673,6 +674,8 @@ function HostPanel({view, stage, host, joinUrl, project, projector, onNextStage}
       )
     case 'results':
       return <ResultsPanel view={view} host={host} pid={project.hostPid} />
+    case 'board':
+      return <BoardPanel view={view} host={host} />
     case 'decide':
       return <DecidePanel view={view} host={host} />
     case 'summary':

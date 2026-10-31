@@ -80,8 +80,8 @@ export function TemplatesPage({onBack}: {onBack: () => void}) {
   )
 }
 
-// «Карта пути» — отдельный режим этапа, в своих шаблонах его не выбирают
-const KIND_LABEL: Record<Exclude<TemplateKind, 'journey'>, string> = {problem: 'Проблемы', idea: 'Идеи', risk: 'Риски (вероятность, ущерб)', other: 'Другое (все критерии)'}
+// «Карта пути» и MVP-доска — отдельные режимы этапа, в своих шаблонах их не выбирают
+const KIND_LABEL: Record<Exclude<TemplateKind, 'journey' | 'mvp'>, string> = {problem: 'Проблемы', idea: 'Идеи', risk: 'Риски (вероятность, ущерб)', other: 'Другое (все критерии)'}
 const TYPES = Object.keys(FIELD_TYPE_LABEL) as FieldType[]
 
 export function TemplateEditor({initial, onSave, onCancel}: {initial: StageTemplate; onSave: (t: StageTemplate) => void; onCancel: () => void}) {

@@ -4,7 +4,7 @@ import type {TemplateKind} from './template'
 
 export interface LibraryCriterion {
   key: string
-  for: 'problem' | 'idea' | 'risk'
+  for: 'problem' | 'idea' | 'risk' | 'mvp'
   name: string
   question: string
   anchors: {1: string; 3: string; 5: string}
@@ -55,6 +55,12 @@ export const LIBRARY: LibraryCriterion[] = [
   {key: 'damage', for: 'risk', name: 'Ущерб', tag: 'value',
     question: 'Насколько это навредит проекту, если случится?',
     anchors: {1: 'Мелкая неприятность', 3: 'Придётся заметно переделывать', 5: 'Проект закроется'}},
+  {key: 'comp-value', for: 'mvp', name: 'Ценность', tag: 'value',
+    question: 'Насколько этот компонент нужен для главной пользы продукта?',
+    anchors: {1: 'Приятное дополнение', 3: 'Заметно улучшает продукт', 5: 'Без него продукт бессмыслен'}},
+  {key: 'comp-effort', for: 'mvp', name: 'Сложность', tag: 'feasibility',
+    question: 'Сколько сил уйдёт, чтобы сделать этот компонент?',
+    anchors: {1: 'За вечер', 3: 'Около недели', 5: 'Месяц и больше или нужны специалисты'}},
   {key: 'money', for: 'idea', name: 'Монетизация', tag: 'value',
     question: 'Понятно ли, кто и за что заплатит?',
     anchors: {1: 'Непонятно, кто заплатит', 3: 'Есть идея модели', 5: 'Понятно кто, за что и сколько'}}
@@ -62,7 +68,7 @@ export const LIBRARY: LibraryCriterion[] = [
 
 // Библиотека критериев для вида шаблона: у «другого» доступны все
 export function libraryFor(kind: TemplateKind): LibraryCriterion[] {
-  return kind === 'other' ? LIBRARY.filter(l => l.for !== 'risk') : LIBRARY.filter(l => l.for === kind)
+  return kind === 'other' ? LIBRARY.filter(l => l.for === 'problem' || l.for === 'idea') : LIBRARY.filter(l => l.for === kind)
 }
 
 export function fromLibrary(key: string, id: string): Criterion {

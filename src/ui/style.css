@@ -573,3 +573,15 @@ button.emo.on { filter: none; opacity: 1; border-color: var(--violet); backgroun
 table.robust td, table.robust th { text-align: center; white-space: nowrap; }
 table.robust td:first-child, table.robust th:first-child { text-align: left; white-space: normal; min-width: 160px; }
 table.robust .top-cell { background: var(--mint-soft); color: var(--mint-deep); border-radius: 8px; }
+
+/* ——— MVP-доска ——— */
+.board { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; align-items: start; }
+.bucket { border-radius: var(--radius); padding: 10px; background: var(--surface-2); border: 2px dashed transparent; display: flex; flex-direction: column; gap: 8px; min-height: 120px; transition: border-color .2s ease; }
+.bucket.mvp { background: linear-gradient(160deg, var(--mint-soft), var(--surface-2)); }
+.bucket.drag-over { border-color: var(--violet); }
+.bucket-head { display: flex; justify-content: space-between; align-items: center; padding: 2px 4px; }
+.bucket .card + .card { margin-top: 0; }
+.comp { padding: 10px 12px; cursor: grab; }
+.bar.budget > i { background: linear-gradient(90deg, var(--mint), var(--violet)); }
+.bar.budget.over > i { background: linear-gradient(90deg, var(--warn), var(--bad)); }
+@media (max-width: 760px) { .board { grid-template-columns: 1fr; } }

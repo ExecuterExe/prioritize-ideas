@@ -6,13 +6,14 @@ import type {Assumption, AssumptionRound, Experiment} from './assume'
 import type {ParentLink} from './evolve'
 import type {Journey} from './journey'
 import type {Scenario} from './scenario'
+import type {Board} from './board'
 
 // id шаблона этапа: 'problem', 'idea', 'hypothesis' или свой
 export type StageType = string
 
 export type Phase =
   | 'lobby' | 'steps' | 'generate' | 'evolve' | 'merge' | 'criteria' | 'calibrate' | 'shortlist'
-  | 'rate' | 'results' | 'rate2' | 'decide' | 'summary'
+  | 'rate' | 'results' | 'rate2' | 'decide' | 'board' | 'summary'
 
 export type Tag = 'novelty' | 'feasibility' | 'value' | 'testability'
 
@@ -145,6 +146,7 @@ export interface Stage {
   evolveAssign?: Record<string, string[]>
   journey?: Journey
   scenarios?: Scenario[]
+  board?: Board
   version: number
   createdAt: number
 }
@@ -178,6 +180,7 @@ export const PHASE_LABEL: Record<Phase, string> = {
   results: 'Результаты',
   rate2: 'Второй раунд',
   decide: 'Решение',
+  board: 'MVP-доска',
   summary: 'Итог'
 }
 
