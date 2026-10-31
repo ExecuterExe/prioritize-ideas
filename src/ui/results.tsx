@@ -8,6 +8,7 @@ import {complianceItems, passportFilled, passportMarkdown} from '../core/passpor
 import {CATEGORY_SHORT, METHOD_LABEL, STATUS_ICON, STATUS_LABEL, threatsFor} from '../core/assume'
 import {toast} from './toast'
 import {GenealogyTree, originLabel} from './evolve'
+import {RISK_STATUS_LABEL, riskRows} from '../core/risk'
 import type {Action} from '../core/engine'
 
 type Send = (a: Action) => Promise<string | null>
@@ -33,13 +34,14 @@ export function ResultsView({view, send, canArgue}: {view: PublicView; send?: Se
   const cardById = (id: string) => view.cards.find(c => c.id === id)
   const leader = res.cards[0]
   const leaderCard = leader && cardById(leader.cardId)
+  const critical = new Set(view.template.kind === 'risk' ? riskRows(res.cards, view.criteria, view.decisions).filter(x => x.critical).map(x => x.cardId) : [])
   return (
     <div class="stack stagger">
       {leader && leaderCard && leader.score !== null && (
         <div class="card leader">
           <div class="row between" style={{alignItems: 'flex-start', position: 'relative', zIndex: 1}}>
             <div style={{flex: 1, minWidth: 200}}>
-              <div class="leader-kicker">🏆 Лидер команды</div>
+              <div class="leader-kicker">{view.template.kind === 'risk' ? '🔥 Самый опасный сценарий' : '🏆 Лидер команды'}</div>
               <h2 style={{margin: '8px 0 4px', fontSize: '1.35rem'}}>{cardTitle(view.template, leaderCard.fields)}</h2>
               <div class="small">{cardSubtitle(view.template, leaderCard.fields)}</div>
               {leaderCard.parents?.length ? <div class="small" style={{marginTop: 4}}>🌱 Выросла из чужих идей: {originLabel(leaderCard, view)}</div> : null}
@@ -62,10 +64,11 @@ export function ResultsView({view, send, canArgue}: {view: PublicView; send?: Se
               <div style={{flex: 1, minWidth: 0}}>
                 <CardBody tpl={view.template} refOptions={view.refOptions} card={card} />
                 <div class="row" style={{gap: 6, marginTop: 6}}>
-                  {decision?.status === 'chosen' && <span class="chip ok">✅ Выбрано</span>}
-                  {decision?.status === 'deferred' && <span class="chip warn">⏸ Отложено</span>}
-                  {decision?.status === 'rejected' && <span class="chip bad">✖ Отклонено</span>}
+                  {decision?.status === 'chosen' && <span class="chip ok">{view.template.kind === 'risk' ? RISK_STATUS_LABEL.chosen : '✅ Выбрано'}</span>}
+                  {decision?.status === 'deferred' && <span class="chip warn">{view.template.kind === 'risk' ? RISK_STATUS_LABEL.deferred : '⏸ Отложено'}</span>}
+                  {decision?.status === 'rejected' && <span class="chip bad">{view.template.kind === 'risk' ? RISK_STATUS_LABEL.rejected : '✖ Отклонено'}</span>}
                   <Badges r={r} />
+                  {critical.has(r.cardId) && <span class="chip bad" title="Вероятность и ущерб — в среднем 3,5 и выше">🔥 Критический риск</span>}
                   {send && r.guess && <AssumeButton view={view} cardId={r.cardId} send={send} />}
                 </div>
               </div>
@@ -204,6 +207,15 @@ export function buildMarkdown(view: PublicView, projectTitle: string): string {
     }
     L.push('')
   }
+  if (view.template.kind === 'risk' && res) {
+    const rows = riskRows(res.cards, view.criteria, view.decisions)
+    L.push('## Реестр рисков', '', '| Сценарий провала | Вероятность | Ущерб | Статус | Мера |', '| --- | --- | --- | --- | --- |')
+    for (const x of rows) {
+      const st = x.status ? RISK_STATUS_LABEL[x.status] : '—'
+      L.push(`| ${x.critical ? '🔥 ' : ''}${title(x.cardId)} | ${x.probability?.toFixed(1) ?? '—'} | ${x.damage?.toFixed(1) ?? '—'} | ${st} | ${x.mitigation ?? ''} |`)
+    }
+    L.push('')
+  }
   const items = complianceItems(view.passport)
   if (items.length && chosen.length) {
     L.push('## Соответствие заданию', '')
@@ -247,7 +259,7 @@ export function buildMarkdown(view: PublicView, projectTitle: string): string {
 
 // Lean Canvas — только для встроенных видов «проблема» и «идея»
 export function buildLeanCanvas(view: PublicView): string | null {
-  if (view.template.kind === 'other') return null
+  if (view.template.kind !== 'problem' && view.template.kind !== 'idea') return null
   const t = (v: unknown) => asText(v as never)
   const pick = (status: 'chosen' | 'deferred') => view.decisions.filter(d => d.status === status)
     .map(d => view.cards.find(c => c.id === d.cardId)).filter(Boolean) as PublicView['cards']
@@ -286,6 +298,7 @@ export function SummaryView({view, projectTitle, extra}: {view: PublicView; proj
   const chosen = view.decisions.filter(d => d.status === 'chosen')
   return (
     <div class="stack">
+      {view.template.kind === 'risk' && view.results && <RiskRegister view={view} />}
       <div class="card">
         <h2>Итог</h2>
         {chosen.map(d => {
@@ -345,6 +358,28 @@ export function ThreatNote({view, cardId}: {view: PublicView; cardId: string}) {
       {t.refuted.length > 0 && <div class="threat bad">⛔ Под угрозой: опровергнуто {t.refuted.map(a => `«${a.text}»`).join(', ')}</div>}
       {t.leapUntested.length > 0 && <div class="threat warn">🎯 Держится на непроверенном важном: {t.leapUntested.map(a => `«${a.text}»`).join(', ')}</div>}
       <div class="tiny muted">Предположения: {t.linked.map(a => `${STATUS_ICON[a.status]} ${a.text}`).join(' · ')}</div>
+    </div>
+  )
+}
+
+function RiskRegister({view}: {view: PublicView}) {
+  const rows = riskRows(view.results!.cards, view.criteria, view.decisions)
+  const title = (id: string) => { const c = view.cards.find(x => x.id === id); return c ? cardTitle(view.template, c.fields) : id }
+  return (
+    <div class="card stack">
+      <h2>🧯 Реестр рисков</h2>
+      <div class="tiny muted">🔥 — критический: и вероятность, и ущерб в среднем 3,5 и выше.</div>
+      <table class="simple">
+        <thead><tr><th>Сценарий провала</th><th>Вероятн.</th><th>Ущерб</th><th>Что делаем</th></tr></thead>
+        <tbody>{rows.map(x => (
+          <tr key={x.cardId}>
+            <td>{x.critical ? '🔥 ' : ''}{title(x.cardId)}</td>
+            <td>{x.probability?.toFixed(1) ?? '—'}</td>
+            <td>{x.damage?.toFixed(1) ?? '—'}</td>
+            <td>{x.status ? RISK_STATUS_LABEL[x.status] : <span class="muted">не решено</span>}{x.mitigation ? <div class="small">{x.mitigation}</div> : null}</td>
+          </tr>
+        ))}</tbody>
+      </table>
     </div>
   )
 }

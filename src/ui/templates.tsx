@@ -1,7 +1,7 @@
 // Конструктор: библиотека шаблонов и редактор с живым предпросмотром «как на телефоне».
 import {useEffect, useRef, useState} from 'preact/hooks'
 import {uid} from '../core/engine'
-import {LIBRARY} from '../core/library'
+import {libraryFor} from '../core/library'
 import {
   BUILTIN_TEMPLATES, FIELD_TYPE_LABEL, blankTemplate, lintCard, lintTemplate, validateCard,
   type FieldDef, type FieldType, type FieldValue, type StageTemplate, type TemplateKind
@@ -80,7 +80,7 @@ export function TemplatesPage({onBack}: {onBack: () => void}) {
   )
 }
 
-const KIND_LABEL: Record<TemplateKind, string> = {problem: 'Проблемы', idea: 'Идеи', other: 'Другое (все критерии)'}
+const KIND_LABEL: Record<TemplateKind, string> = {problem: 'Проблемы', idea: 'Идеи', risk: 'Риски (вероятность, ущерб)', other: 'Другое (все критерии)'}
 const TYPES = Object.keys(FIELD_TYPE_LABEL) as FieldType[]
 
 export function TemplateEditor({initial, onSave, onCancel}: {initial: StageTemplate; onSave: (t: StageTemplate) => void; onCancel: () => void}) {
@@ -111,7 +111,7 @@ export function TemplateEditor({initial, onSave, onCancel}: {initial: StageTempl
   }))
   const pv = validateCard(t, preview)
   const hints = lintCard(t, preview)
-  const libForKind = t.kind === 'other' ? LIBRARY : LIBRARY.filter(l => l.for === t.kind)
+  const libForKind = libraryFor(t.kind)
 
   return (
     <div class="wrap stack phase-enter">

@@ -34,6 +34,8 @@ export function createStage(opts: {
 }): Stage {
   const settings = {...DEFAULT_SETTINGS, ...opts.settings}
   if (settings.timePreset === 'express') { settings.calibration = false; settings.secondRound = false; settings.evolve = false }
+  // Развивать чужие «причины провала» не нужно — их важно собрать независимо
+  if (opts.template.kind === 'risk') settings.evolve = false
   return {
     id: uid(), projectId: opts.projectId, type: opts.template.id, template: structuredClone(opts.template), title: opts.title,
     sourceProblem: opts.sourceProblem, sourceFields: opts.sourceFields, refOptions: opts.refOptions,
@@ -681,7 +683,8 @@ export function canAdvance(s: Stage): string | null {
     }
     case 'rate': return submittedCount(s) >= Math.max(1, Math.ceil(activeParticipants(s).length / 2))
       ? null : 'Отправили оценки меньше половины участников'
-    case 'decide': return s.decisions.some(d => d.status === 'chosen') ? null : 'Отметьте хотя бы одну карточку как выбранную'
+    // В pre-mortem критических рисков может и не оказаться — это тоже результат
+    case 'decide': return s.template.kind === 'risk' || s.decisions.some(d => d.status === 'chosen') ? null : 'Отметьте хотя бы одну карточку как выбранную'
     default: return null
   }
 }

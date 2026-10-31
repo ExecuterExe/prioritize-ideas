@@ -31,7 +31,7 @@ export type LintRule =
   | {rule: 'min-length'; field: string; n: number; text: string}
 
 // Вид шаблона определяет библиотеку критериев и проверки критериев
-export type TemplateKind = 'problem' | 'idea' | 'other'
+export type TemplateKind = 'problem' | 'idea' | 'risk' | 'other'
 
 export interface StageTemplate {
   id: string
@@ -75,6 +75,12 @@ export const FIELD_TYPE_LABEL: Record<FieldType, string> = {
 const SHORT = 200, LONG = 600
 
 // ——— Встроенные шаблоны ———
+
+// Категории причин провала (pre-mortem) и связь с видами предположений
+export const RISK_CATEGORIES = [
+  'Проблема оказалась незначительной', 'Люди не стали менять привычки', 'Не хватило ресурсов',
+  'Технология не заработала', 'Появился сильный конкурент', 'Не сошлась экономика', 'Другое'
+]
 
 export const BUILTIN_TEMPLATES: StageTemplate[] = [
   {
@@ -128,6 +134,19 @@ export const BUILTIN_TEMPLATES: StageTemplate[] = [
     defaultCriteria: ['user-value', 'hypothesis', 'feasibility']
   },
   {
+    id: 'premortem', name: 'Причина провала', emoji: '🪦', kind: 'risk', builtin: true, askBasis: false,
+    intro: 'Прошло 6 месяцев. Наш продукт закрылся. Почему это случилось?',
+    fields: [
+      {key: 'what', label: 'Что пошло не так', hint: 'студенты попробовали и вернулись к чату в Telegram', type: 'longtext', required: true},
+      {key: 'category', label: 'Почему по сути', type: 'select', required: true, options: RISK_CATEGORIES},
+      {key: 'signal', label: 'Ранний сигнал', hint: 'что мы заметили бы заранее', type: 'text', required: false}
+    ],
+    titleField: 'what', subtitleFields: ['category'],
+    lint: [{rule: 'min-length', field: 'what', n: 20, text: 'Опишите сценарий провала конкретнее: кто, что сделал, почему'}],
+    defaultCriteria: ['probability', 'damage'],
+    matrixAxes: ['probability', 'damage']
+  },
+  {
     id: 'trend', name: 'Тренд', emoji: '📈', kind: 'other', builtin: true, askBasis: true,
     intro: 'Какие изменения в мире или технологиях создают новые возможности?',
     fields: [
@@ -145,6 +164,8 @@ export const BUILTIN_TEMPLATES: StageTemplate[] = [
 export const BUILTIN_WORKFLOWS: Workflow[] = [
   {id: 'classic', name: 'Классика', description: 'Выбрать проблему, затем идею решения', steps: ['problem', 'idea'], builtin: true},
   {id: 'hypotheses', name: 'От гипотез', description: 'Идея уже есть — сформулировать и выбрать гипотезы', steps: ['idea', 'hypothesis'], builtin: true},
+  {id: 'classic-premortem', name: 'Классика + pre-mortem', description: 'Проблема → идея → «почему мы провалились»', steps: ['problem', 'idea', 'premortem'], builtin: true},
+  {id: 'concept-check', name: 'Проверка концепции', description: 'Концепция уже выбрана — найти, что может её погубить', steps: ['premortem'], builtin: true},
   {id: 'trends', name: 'От трендов', description: 'Тренд → проблема → идея', steps: ['trend', 'problem', 'idea'], builtin: true},
   {id: 'problem-only', name: 'Только проблема', description: 'Один этап — выбрать проблему', steps: ['problem'], builtin: true}
 ]

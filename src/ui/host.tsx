@@ -2,7 +2,8 @@
 import {useEffect, useMemo, useRef, useState} from 'preact/hooks'
 import {createStage, participantKey, uid, type Action, type PublicView} from '../core/engine'
 import {libraryFor} from '../core/library'
-import {BUILTIN_TEMPLATES, BUILTIN_WORKFLOWS, cardSubtitle, cardTitle, isEmpty, type Workflow} from '../core/template'
+import {BUILTIN_TEMPLATES, BUILTIN_WORKFLOWS, asText, cardSubtitle, cardTitle, isEmpty, type Workflow} from '../core/template'
+import {RISK_STATUS_LABEL, riskAssumptionText, riskRows, riskToAssumptionCategory} from '../core/risk'
 import {lintCriteria, criterionReady} from '../core/lint'
 import {PHASE_LABEL, TAG_LABEL, type Criterion, type Settings, type Stage, type Tag, type TimePreset} from '../core/types'
 import {fromB64u, importKey, randomBytes, sha256hex, toB64u} from '../net/crypto'
@@ -845,39 +846,64 @@ function DecidePanel({view, host}: {view: PublicView; host: (a: Action) => strin
   const [reasons, setReasons] = useState<Record<string, string>>({})
   if (!res) return null
   const leader = res.cards[0]?.cardId
+  // В pre-mortem вместо «выбрать» — что делаем с риском
+  const isRisk = view.template.kind === 'risk'
+  const risks = isRisk ? riskRows(res.cards, view.criteria, view.decisions) : []
+  const label = isRisk
+    ? RISK_STATUS_LABEL
+    : {chosen: '✅ Выбрать', deferred: '⏸ Отложить', rejected: '✖ Отклонить'}
   return (
     <div class="stack">
-      <PhaseIntro emoji="🤝" title="Принимаем решение">Отметьте выбранное. Отложенному — причину, чтобы вернуться позже.</PhaseIntro>
+      {isRisk
+        ? <PhaseIntro emoji="🧯" title="Что делаем с рисками">Для опасных — мера: как не допустить. Остальные — следим или считаем неважными.</PhaseIntro>
+        : <PhaseIntro emoji="🤝" title="Принимаем решение">Отметьте выбранное. Отложенному — причину, чтобы вернуться позже.</PhaseIntro>}
       {res.cards.map(r => {
         const card = view.cards.find(c => c.id === r.cardId)
         if (!card) return null
         const d = view.decisions.find(x => x.cardId === r.cardId)
         const reason = reasons[r.cardId] ?? d?.reason ?? ''
         const set = (status: 'chosen' | 'deferred' | 'rejected' | null) => host({type: 'decision.set', cardId: r.cardId, status, reason})
-        const needReason = (d?.status === 'deferred') || (d?.status === 'chosen' && r.cardId !== leader)
+        const critical = risks.find(x => x.cardId === r.cardId)?.critical
+        const needReason = isRisk ? d?.status === 'chosen' : (d?.status === 'deferred') || (d?.status === 'chosen' && r.cardId !== leader)
         return (
           <div class="card stack" key={r.cardId}>
             <div class="row between" style={{alignItems: 'flex-start'}}>
-              <div style={{flex: 1}}><span class="chip">#{r.rank} · {r.score ?? '—'}</span> {r.gem && <span class="chip gem">💎</span>} {r.disputed && <span class="chip warn">⚡</span>}<div style={{marginTop: 4}}><CardBody tpl={view.template} refOptions={view.refOptions} card={card} /></div></div>
+              <div style={{flex: 1}}><span class="chip">#{r.rank} · {r.score ?? '—'}</span> {r.gem && <span class="chip gem">💎</span>} {r.disputed && <span class="chip warn">⚡</span>} {critical && <span class="chip bad">🔥 Критический</span>}<div style={{marginTop: 4}}><CardBody tpl={view.template} refOptions={view.refOptions} card={card} /></div></div>
             </div>
             <div class="row">
-              <button class={`small ${d?.status === 'chosen' ? 'primary' : ''}`} onClick={() => set(d?.status === 'chosen' ? null : 'chosen')}>✅ Выбрать</button>
-              <button class={`small ${d?.status === 'deferred' ? 'selected' : ''}`} onClick={() => set(d?.status === 'deferred' ? null : 'deferred')}>⏸ Отложить</button>
-              <button class={`small ${d?.status === 'rejected' ? 'selected' : ''}`} onClick={() => set(d?.status === 'rejected' ? null : 'rejected')}>✖ Отклонить</button>
+              <button class={`small ${d?.status === 'chosen' ? 'primary' : ''}`} onClick={() => set(d?.status === 'chosen' ? null : 'chosen')}>{label.chosen}</button>
+              <button class={`small ${d?.status === 'deferred' ? 'selected' : ''}`} onClick={() => set(d?.status === 'deferred' ? null : 'deferred')}>{label.deferred}</button>
+              <button class={`small ${d?.status === 'rejected' ? 'selected' : ''}`} onClick={() => set(d?.status === 'rejected' ? null : 'rejected')}>{label.rejected}</button>
             </div>
             {d && (
-              <input type="text" placeholder={d.status === 'chosen' ? (r.cardId !== leader ? 'Почему выбрали не лидера? (одна строка)' : 'Почему выбрали (необязательно)') : d.status === 'deferred' ? 'Причина — когда вернуться? *' : 'Причина (необязательно)'}
+              <input type="text" placeholder={isRisk ? (d.status === 'chosen' ? 'Как предотвратим? Кто и к какому сроку? *' : 'Комментарий (необязательно)') : d.status === 'chosen' ? (r.cardId !== leader ? 'Почему выбрали не лидера? (одна строка)' : 'Почему выбрали (необязательно)') : d.status === 'deferred' ? 'Причина — когда вернуться? *' : 'Причина (необязательно)'}
                 value={reason} onInput={e => setReasons({...reasons, [r.cardId]: (e.target as HTMLInputElement).value})}
                 onBlur={() => host({type: 'decision.set', cardId: r.cardId, status: d.status, reason})} />
             )}
-            {needReason && !reason.trim() && <div class="hint">Запишите причину — это поможет при защите и при возврате к варианту.</div>}
-            {d?.status === 'chosen' && <ThreatNote view={view} cardId={r.cardId} />}
-            {d?.status === 'chosen' && <ComplianceCheck p={view.passport} marks={view.compliance[r.cardId]}
+            {needReason && !reason.trim() && <div class="hint">{isRisk ? 'Запишите меру — без неё риск так и останется риском.' : 'Запишите причину — это поможет при защите и при возврате к варианту.'}</div>}
+            {isRisk && d?.status === 'chosen' && <RiskToAssumption view={view} cardId={r.cardId} host={host} />}
+            {!isRisk && d?.status === 'chosen' && <ThreatNote view={view} cardId={r.cardId} />}
+            {!isRisk && d?.status === 'chosen' && <ComplianceCheck p={view.passport} marks={view.compliance[r.cardId]}
               onSet={(item, v) => host({type: 'compliance.set', cardId: r.cardId, item, value: v})} />}
           </div>
         )
       })}
     </div>
+  )
+}
+
+// Опасный сценарий → скрытое предположение «этого не случится» → эксперимент
+function RiskToAssumption({view, cardId, host}: {view: PublicView; cardId: string; host: (a: Action) => string | null}) {
+  const card = view.cards.find(c => c.id === cardId)
+  if (!card) return null
+  const what = asText(card.fields.what)
+  const done = view.assumptions.some(a => a.linkedCardId === cardId)
+  if (done) return <div class="tiny" style={{color: 'var(--ok)', fontWeight: 700}}>🎯 Записано в предположения — проверку можно спланировать во вкладке «Предположения»</div>
+  return (
+    <button class="small ghost" style={{alignSelf: 'flex-start'}} onClick={() => {
+      const r = host({type: 'assumption.add', id: uid(), text: riskAssumptionText(what), category: riskToAssumptionCategory(asText(card.fields.category)), linkedCardId: cardId, linkedTitle: `🪦 ${what}`})
+      toast(r ?? 'Добавлено в предположения', r ? 'error' : 'ok')
+    }}>🎯 Записать как предположение «этого не случится»</button>
   )
 }
 
