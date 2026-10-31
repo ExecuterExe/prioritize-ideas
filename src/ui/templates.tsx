@@ -80,7 +80,8 @@ export function TemplatesPage({onBack}: {onBack: () => void}) {
   )
 }
 
-const KIND_LABEL: Record<TemplateKind, string> = {problem: 'Проблемы', idea: 'Идеи', risk: 'Риски (вероятность, ущерб)', other: 'Другое (все критерии)'}
+// «Карта пути» — отдельный режим этапа, в своих шаблонах его не выбирают
+const KIND_LABEL: Record<Exclude<TemplateKind, 'journey'>, string> = {problem: 'Проблемы', idea: 'Идеи', risk: 'Риски (вероятность, ущерб)', other: 'Другое (все критерии)'}
 const TYPES = Object.keys(FIELD_TYPE_LABEL) as FieldType[]
 
 export function TemplateEditor({initial, onSave, onCancel}: {initial: StageTemplate; onSave: (t: StageTemplate) => void; onCancel: () => void}) {
@@ -132,7 +133,7 @@ export function TemplateEditor({initial, onSave, onCancel}: {initial: StageTempl
             <div class="row small">
               <label class="row">Критерии из библиотеки для:
                 <select value={t.kind} onChange={e => set({kind: (e.target as HTMLSelectElement).value as TemplateKind})}>
-                  {(Object.keys(KIND_LABEL) as TemplateKind[]).map(k => <option key={k} value={k}>{KIND_LABEL[k]}</option>)}
+                  {(Object.keys(KIND_LABEL) as (keyof typeof KIND_LABEL)[]).map(k => <option key={k} value={k}>{KIND_LABEL[k]}</option>)}
                 </select>
               </label>
               <label class="check"><input type="checkbox" checked={t.askBasis} onChange={e => set({askBasis: (e.target as HTMLInputElement).checked})} />Спрашивать «откуда мы это знаем»</label>

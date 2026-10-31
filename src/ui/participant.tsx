@@ -9,6 +9,7 @@ import {AnchorLine, Anchors, Avatars, CardBody, ErrorLine, PhaseIntro, ScoreButt
 import {toast} from './toast'
 import {CardForm} from './cardform'
 import {EvolveStep} from './evolve'
+import {JourneyParticipant} from './journey'
 import {hashKey} from '../core/evolve'
 import {ResultsView, SummaryView} from './results'
 import {PassportView} from './passport'
@@ -63,6 +64,7 @@ export function ParticipantStage({view, pid, send, storeKey, assignKey}: Props) 
   if (!me) return <div class="card">Подключаемся к комнате…</div>
   if (!me.active) return <div class="card">Организатор отметил вас как неактивного. Попросите вернуть вас в сессию.</div>
 
+  if (view.template.mode === 'journey' && view.phase !== 'lobby') return <JourneyParticipant view={view} send={send} pid={pid} storeKey={storeKey} />
   switch (view.phase) {
     case 'lobby':
       return (

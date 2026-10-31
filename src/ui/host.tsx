@@ -10,7 +10,9 @@ import {fromB64u, importKey, randomBytes, sha256hex, toB64u} from '../net/crypto
 import {NostrTransport, type RelayState} from '../net/nostr'
 import {HostSession} from '../net/session'
 import {deleteProject, downloadFile, listProjects, loadProject, lsGet, lsSet, saveProject, withStage, type StoredProject} from '../store/db'
-import {Avatar, Avatars, CardBody, ErrorLine, PhaseIntro, PhaseSteps, QR, Ring, Timer, plural, stepLabel} from './common'
+import {Avatar, Avatars, CardBody, ErrorLine, PhaseIntro, PhaseSteps, QR, Ring, Timer, phaseName, plural, stepLabel} from './common'
+import {JourneyHost, JourneySummary, journeyMarkdown} from './journey'
+import {barrierToProblem} from '../core/journey'
 import {ParticipantStage} from './participant'
 import {ResultsView, SummaryView} from './results'
 import {toast} from './toast'
@@ -187,8 +189,20 @@ function NewStage({init, onCancel, onCreated}: {
     const i = last ? p.workflow.steps.indexOf(last) : -1
     return p.workflow.steps[i + 1]
   })()
-  const [templateId, setTemplateId] = useState<string>(nextInWorkflow ?? p?.stages.at(-1)?.template.id ?? 'problem')
+  const fromJourney = !!p?.stages.find(s => s.id === init.fromStageId)?.journey
+  const [templateId, setTemplateId] = useState<string>(nextInWorkflow ?? (fromJourney ? 'problem' : p?.stages.at(-1)?.template.id ?? 'problem'))
   const prior = priorCards(p)
+  // Карта пути: самые болезненные барьеры переносим как карточки проблем
+  const journeySrc = (() => {
+    const st = p?.stages.find(s => s.id === init.fromStageId)
+    if (!st?.journey) return undefined
+    const counts = Object.fromEntries(st.cards.map(c => [c.id, st.approvals.filter(a => a.cardIds.includes(c.id)).length]))
+    const list = [...st.cards].sort((a, b) => counts[b.id] - counts[a.id]).map(c => ({
+      id: c.id, votes: counts[c.id], text: asText(c.fields.what), step: st.journey!.steps.find(x => x.id === c.stepId)?.title ?? ''
+    }))
+    return {persona: st.journey.persona, list}
+  })()
+  const [barriers, setBarriers] = useState<string[]>(() => journeySrc ? journeySrc.list.filter(b => b.votes > 0).slice(0, 5).map(b => b.id) : [])
   const fromStage = p?.stages.find(s => s.id === init.fromStageId)
   const defaultSource = prior.find(x => x.stage.id === fromStage?.id && x.status === 'chosen') ?? prior.find(x => x.status === 'chosen')
   const [sourceId, setSourceId] = useState<string>(defaultSource ? `${defaultSource.stage.id}:${defaultSource.card.id}` : '')
@@ -225,7 +239,10 @@ function NewStage({init, onCancel, onCreated}: {
       title: title.trim() || tpl.name,
       sourceProblem: sourceProblem.trim() || undefined,
       sourceFields: src?.card.fields,
-      refOptions: prior.map(x => ({id: x.card.id, title: `${x.stage.template.emoji} ${cardTitle(x.stage.template, x.card.fields)}`}))
+      refOptions: prior.map(x => ({id: x.card.id, title: `${x.stage.template.emoji} ${cardTitle(x.stage.template, x.card.fields)}`})),
+      seedCards: journeySrc && tpl.kind === 'problem'
+        ? journeySrc.list.filter(b => barriers.includes(b.id)).map(b => barrierToProblem(journeySrc.persona, b.step, b.text))
+        : undefined
     })
     let next = withStage({...project, title: projectTitle.trim(), hostName: hostName.trim(), mode}, s)
     // Одна комната на проект: участники остаются подключены и сами переходят в новый этап
@@ -313,6 +330,19 @@ function NewStage({init, onCancel, onCreated}: {
           </label>
           {src && tpl.fields.some(f => f.prefill && !isEmpty(src.card.fields[f.prefill])) && (
             <div class="tiny muted">Подставится из исходной карточки: {tpl.fields.filter(f => f.prefill && !isEmpty(src.card.fields[f.prefill])).map(f => `«${f.label}»`).join(', ')}.</div>
+          )}
+          {journeySrc && tpl.kind === 'problem' && (
+            <div class="field"><span>Барьеры с карты пути → карточки проблем</span>
+              <div class="stack" style={{gap: 6}}>
+                {journeySrc.list.map(b => (
+                  <label class="check" key={b.id}>
+                    <input type="checkbox" checked={barriers.includes(b.id)} onChange={() => setBarriers(barriers.includes(b.id) ? barriers.filter(x => x !== b.id) : [...barriers, b.id])} />
+                    <span class="small">{b.text} <span class="muted">· {b.step} · {b.votes} гол.</span></span>
+                  </label>
+                ))}
+              </div>
+              <div class="tiny muted">Выбранные барьеры появятся как готовые карточки: кто — {journeySrc.persona || 'персона'}, ситуация — шаг пути. Команда сможет дописать свои.</div>
+            </div>
           )}
           <label class="field"><span>Название этапа (необязательно)</span><input type="text" value={title} placeholder={tpl.name} onInput={e => setTitle((e.target as HTMLInputElement).value)} /></label>
         </div>
@@ -478,7 +508,7 @@ function StageUI({project, session, transport, joinUrl, onExit, onNextStage}: {
           <button class="ghost icon-btn no-print" onClick={onExit} title="К проектам" aria-label="К проектам">←</button>
           <div style={{minWidth: 0}}>
             <div class="step-label">{stepLabel(view)} · {view.template.emoji} {view.template.name}</div>
-            <div class="phase-title">{PHASE_LABEL[view.phase]}</div>
+            <div class="phase-title">{phaseName(view)}</div>
           </div>
           <span class="spacer" />
           <PassportButton p={view.passport} onEdit={() => setEditPassport(true)} />
@@ -560,11 +590,23 @@ function HostPanel({view, stage, host, joinUrl, project, projector, onNextStage}
   view: PublicView; stage: Stage; host: (a: Action) => string | null; joinUrl: string; project: StoredProject; projector: boolean
   onNextStage: (p: StoredProject, fromStageId: string) => void
 }) {
+  const journey = view.template.mode === 'journey'
+  if (journey && view.phase === 'summary') {
+    return <JourneySummary view={view} extra={
+      <div class="row no-print">
+        <button class="primary" onClick={() => onNextStage(project, view.stageId)}>Сделать барьеры проблемами →</button>
+        <button onClick={async () => { try { await navigator.clipboard.writeText(journeyMarkdown(view, project.title)); toast('Отчёт скопирован') } catch { toast('Не удалось скопировать', 'error') } }}>Скопировать отчёт</button>
+        <button onClick={() => downloadFile(`${project.title}.json`, JSON.stringify(project, null, 1))}>Сохранить проект в файл</button>
+      </div>
+    } />
+  }
+  if (journey && view.phase !== 'lobby') return <JourneyHost view={view} host={host} />
   switch (view.phase) {
     case 'lobby':
       return (
         <div class="stack">
         <PhaseIntro emoji="👋" title="Собираем команду">Покажите QR-код или отправьте ссылку в чат. Когда все появятся — жмите «Дальше».</PhaseIntro>
+        {journey && <JourneyHost view={view} host={host} />}
         {passportFilled(view.passport) && <div class="card"><h3>📋 Задание</h3><PassportView p={view.passport!} /></div>}
         <div class="grid" style={{gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))'}}>
           <div class="card stack center">
@@ -946,6 +988,7 @@ function SingleScreen({view, stage, host, asParticipant, project, onNextStage}: 
     return (
       <div class="stack">
         {passportFilled(view.passport) && <div class="card"><h3>📋 Задание</h3><PassportView p={view.passport!} /></div>}
+        {view.template.mode === 'journey' && <JourneyHost view={view} host={host} />}
         <div class="card stack">
           <h3>Кто участвует</h3>
           <div class="row">{stage.participants.map(p => <span class="chip" key={p.id}>{p.name}</span>)}</div>

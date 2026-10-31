@@ -551,3 +551,19 @@ button.mini.on { background: var(--sc); color: #fff; border-color: var(--sc); }
 .compare { border-top: 1px dashed var(--border); padding-top: 10px; }
 .diff-add { background: var(--mint-soft); color: var(--mint-deep); border-radius: 4px; }
 .diff-del { background: var(--bad-soft); color: var(--bad); text-decoration: line-through; border-radius: 4px; }
+
+/* ——— Карта пути ——— */
+.steps-line { display: flex; gap: 8px; overflow-x: auto; padding-bottom: 4px; }
+.step-chip { flex: none; display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-radius: 14px; background: var(--surface); border: 1px solid var(--border); font-weight: 600; font-size: .9rem; box-shadow: var(--shadow); }
+.step-n { flex: none; display: inline-grid; place-items: center; width: 26px; height: 26px; border-radius: 9px; background: var(--grad); color: #fff; font: 600 .8rem var(--font-display); }
+.emotions { gap: 6px; }
+button.emo { min-width: 44px; min-height: 44px; padding: 0; font-size: 1.4rem; border-radius: 14px; filter: grayscale(.7); opacity: .7; }
+button.emo.on { filter: none; opacity: 1; border-color: var(--violet); background: var(--violet-soft); transform: scale(1.08); }
+.barrier { padding: 2px 0; }
+.curve .zero { stroke: var(--border); stroke-dasharray: 4 4; }
+.curve .band { fill: color-mix(in srgb, var(--violet) 12%, transparent); stroke: none; }
+.curve .line { fill: none; stroke: var(--violet); stroke-width: 3; stroke-linejoin: round; }
+.curve .dot-e { fill: var(--surface); stroke: var(--violet); stroke-width: 2; }
+.curve .dot-e.low { stroke: var(--bad); stroke-width: 3; }
+.curve .face { font-size: 15px; }
+.curve .lbl { font: 600 11px var(--font); fill: var(--muted); }

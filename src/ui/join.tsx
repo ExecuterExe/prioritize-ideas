@@ -1,12 +1,11 @@
 // Приложение участника: вход по ссылке из QR-кода (#j=<roomId>.<key>).
 import {useEffect, useState} from 'preact/hooks'
 import {uid} from '../core/engine'
-import {PHASE_LABEL} from '../core/types'
 import {fromB64u, importKey, sha256hex} from '../net/crypto'
 import {NostrTransport} from '../net/nostr'
 import {ClientSession} from '../net/session'
 import {lsGet, lsSet} from '../store/db'
-import {ErrorLine, PhaseSteps, Timer} from './common'
+import {ErrorLine, PhaseSteps, Timer, phaseName} from './common'
 import {ParticipantStage} from './participant'
 import {Brand} from './host'
 import {PassportButton} from './passport'
@@ -87,7 +86,7 @@ export function JoinApp({roomId, secret}: {roomId: string; secret: string}) {
         <div class="inner">
           <div style={{minWidth: 0, flex: 1}}>
             <div class="tiny muted">{view ? `${view.title}` : 'Подключение…'}</div>
-            <div class="phase-title">{view ? PHASE_LABEL[view.phase] : 'Ищем организатора…'}</div>
+            <div class="phase-title">{view ? phaseName(view) : 'Ищем организатора…'}</div>
           </div>
           {view && <PassportButton p={view.passport} />}
           {view && <button class="ghost icon-btn small" title="Предположения" aria-label="Предположения" onClick={() => setAssumeOpen(true)}>🎯</button>}

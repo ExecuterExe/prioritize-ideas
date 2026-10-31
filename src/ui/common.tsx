@@ -30,7 +30,7 @@ export function Timer({deadline, offset = 0}: {deadline?: number; offset?: numbe
   return <span class={`timer ${left < 0 ? 'over' : left <= 60 ? 'low' : ''}`} title="Осталось времени на шаг">{text}</span>
 }
 
-const STEP_ORDER: Phase[] = ['lobby', 'generate', 'evolve', 'merge', 'criteria', 'calibrate', 'shortlist', 'rate', 'results', 'decide', 'summary']
+const STEP_ORDER: Phase[] = ['lobby', 'steps', 'generate', 'evolve', 'merge', 'criteria', 'calibrate', 'shortlist', 'rate', 'results', 'decide', 'summary']
 
 // Тонкая линия прогресса вместо ряда из десяти «таблеток»
 export function PhaseSteps({view}: {view: PublicView}) {
@@ -42,6 +42,13 @@ export function PhaseSteps({view}: {view: PublicView}) {
       {flow.map((p, i) => <i key={p} class={i < idx ? 'done' : i === idx ? 'on' : ''} />)}
     </div>
   )
+}
+
+// У карты пути свои названия шагов
+const JOURNEY_PHASE_NAME: Partial<Record<Phase, string>> = {steps: 'Шаги пути', generate: 'Барьеры и эмоции', shortlist: 'Самое больное', summary: 'Итог'}
+
+export function phaseName(view: Pick<PublicView, 'phase' | 'template'>): string {
+  return (view.template.mode === 'journey' && JOURNEY_PHASE_NAME[view.phase]) || PHASE_LABEL[view.phase]
 }
 
 export function stepLabel(view: PublicView): string {

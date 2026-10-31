@@ -4,12 +4,13 @@ import type {FieldValue, StageTemplate} from './template'
 import type {ComplianceValue, Passport} from './passport'
 import type {Assumption, AssumptionRound, Experiment} from './assume'
 import type {ParentLink} from './evolve'
+import type {Journey} from './journey'
 
 // id шаблона этапа: 'problem', 'idea', 'hypothesis' или свой
 export type StageType = string
 
 export type Phase =
-  | 'lobby' | 'generate' | 'evolve' | 'merge' | 'criteria' | 'calibrate' | 'shortlist'
+  | 'lobby' | 'steps' | 'generate' | 'evolve' | 'merge' | 'criteria' | 'calibrate' | 'shortlist'
   | 'rate' | 'results' | 'rate2' | 'decide' | 'summary'
 
 export type Tag = 'novelty' | 'feasibility' | 'value' | 'testability'
@@ -49,6 +50,7 @@ export interface Card {
   createdAt: number
   sample?: boolean
   parents?: ParentLink[]
+  stepId?: string // режим «Карта пути»: к какому шагу относится барьер
 }
 
 export interface Criterion {
@@ -140,6 +142,7 @@ export interface Stage {
   disputedForRound2: string[]
   round2Done: boolean
   evolveAssign?: Record<string, string[]>
+  journey?: Journey
   version: number
   createdAt: number
 }
@@ -162,6 +165,7 @@ export interface Project {
 
 export const PHASE_LABEL: Record<Phase, string> = {
   lobby: 'Подключение',
+  steps: 'Шаги пути',
   generate: 'Тихая генерация',
   evolve: 'Развитие',
   merge: 'Склейка дублей',

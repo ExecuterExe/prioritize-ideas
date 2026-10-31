@@ -31,7 +31,7 @@ export type LintRule =
   | {rule: 'min-length'; field: string; n: number; text: string}
 
 // Вид шаблона определяет библиотеку критериев и проверки критериев
-export type TemplateKind = 'problem' | 'idea' | 'risk' | 'other'
+export type TemplateKind = 'problem' | 'idea' | 'risk' | 'journey' | 'other'
 
 export interface StageTemplate {
   id: string
@@ -46,6 +46,7 @@ export interface StageTemplate {
   defaultCriteria: string[]
   matrixAxes?: [string, string] // ключи критериев из библиотеки
   intro?: string
+  mode?: 'decide' | 'journey' // режим этапа: сбор и оценка или карта пути
   builtin?: boolean
   updatedAt?: number
 }
@@ -147,6 +148,12 @@ export const BUILTIN_TEMPLATES: StageTemplate[] = [
     matrixAxes: ['probability', 'damage']
   },
   {
+    id: 'journey', name: 'Карта пути пользователя', emoji: '🗺️', kind: 'journey', mode: 'journey', builtin: true, askBasis: false,
+    intro: 'Найдите, в какой момент жизни пользователя возникает боль.',
+    fields: [{key: 'what', label: 'Что мешает на этом шаге', hint: 'все машины заняты, а узнать заранее нельзя', type: 'longtext', required: true}],
+    titleField: 'what', subtitleFields: [], lint: [], defaultCriteria: []
+  },
+  {
     id: 'trend', name: 'Тренд', emoji: '📈', kind: 'other', builtin: true, askBasis: true,
     intro: 'Какие изменения в мире или технологиях создают новые возможности?',
     fields: [
@@ -164,6 +171,7 @@ export const BUILTIN_TEMPLATES: StageTemplate[] = [
 export const BUILTIN_WORKFLOWS: Workflow[] = [
   {id: 'classic', name: 'Классика', description: 'Выбрать проблему, затем идею решения', steps: ['problem', 'idea'], builtin: true},
   {id: 'hypotheses', name: 'От гипотез', description: 'Идея уже есть — сформулировать и выбрать гипотезы', steps: ['idea', 'hypothesis'], builtin: true},
+  {id: 'sprint-lite', name: 'Sprint-lite: от пути пользователя', description: 'Карта пути → барьеры становятся проблемами → идея', steps: ['journey', 'problem', 'idea'], builtin: true},
   {id: 'classic-premortem', name: 'Классика + pre-mortem', description: 'Проблема → идея → «почему мы провалились»', steps: ['problem', 'idea', 'premortem'], builtin: true},
   {id: 'concept-check', name: 'Проверка концепции', description: 'Концепция уже выбрана — найти, что может её погубить', steps: ['premortem'], builtin: true},
   {id: 'trends', name: 'От трендов', description: 'Тренд → проблема → идея', steps: ['trend', 'problem', 'idea'], builtin: true},
