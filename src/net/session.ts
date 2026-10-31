@@ -181,10 +181,12 @@ export class ClientSession {
   }
 
   private name = ''
+  private token?: string
   private lastHello = 0
 
-  async start(name: string) {
+  async start(name: string, token?: string) {
     this.name = name
+    this.token = token
     this.lastHello = Date.now()
     await this.transport.connect()
     this.netStatus.value = this.transport.status()
@@ -194,7 +196,7 @@ export class ClientSession {
       if (!this.view.value || Date.now() - this.hostSeen.value > 20_000) this.requestSync()
     }, 4000)
     this.requestSync()
-    return this.send({type: 'hello', name})
+    return this.send({type: 'hello', name, token})
   }
 
   requestSync() { void this.channel.send({k: 'sync', from: this.pid}) }
@@ -249,7 +251,7 @@ export class ClientSession {
       // Организатор начал новый этап (или потерял нас) — входим заново
       if (this.name && !m.v.participants.some(p => p.id === this.pid) && Date.now() - this.lastHello > 5000) {
         this.lastHello = Date.now()
-        void this.send({type: 'hello', name: this.name})
+        void this.send({type: 'hello', name: this.name, token: this.token})
       }
     }
   }

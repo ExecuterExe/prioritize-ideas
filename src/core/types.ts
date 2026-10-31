@@ -3,12 +3,13 @@
 import type {FieldValue, StageTemplate} from './template'
 import type {ComplianceValue, Passport} from './passport'
 import type {Assumption, AssumptionRound, Experiment} from './assume'
+import type {ParentLink} from './evolve'
 
 // id шаблона этапа: 'problem', 'idea', 'hypothesis' или свой
 export type StageType = string
 
 export type Phase =
-  | 'lobby' | 'generate' | 'merge' | 'criteria' | 'calibrate' | 'shortlist'
+  | 'lobby' | 'generate' | 'evolve' | 'merge' | 'criteria' | 'calibrate' | 'shortlist'
   | 'rate' | 'results' | 'rate2' | 'decide' | 'summary'
 
 export type Tag = 'novelty' | 'feasibility' | 'value' | 'testability'
@@ -25,6 +26,7 @@ export interface Settings {
   excludeAuthor: boolean
   calibration: boolean
   secondRound: boolean
+  evolve?: boolean
   timePreset: TimePreset
 }
 
@@ -35,6 +37,7 @@ export interface Participant {
   joinedAt: number
   active: boolean
   lastSeen: number
+  token?: string // личный ключ участника, наружу не уходит
 }
 
 export interface Card {
@@ -45,6 +48,7 @@ export interface Card {
   mergedFrom: Card[]
   createdAt: number
   sample?: boolean
+  parents?: ParentLink[]
 }
 
 export interface Criterion {
@@ -135,6 +139,7 @@ export interface Stage {
   calibRevealed: boolean
   disputedForRound2: string[]
   round2Done: boolean
+  evolveAssign?: Record<string, string[]>
   version: number
   createdAt: number
 }
@@ -158,6 +163,7 @@ export interface Project {
 export const PHASE_LABEL: Record<Phase, string> = {
   lobby: 'Подключение',
   generate: 'Тихая генерация',
+  evolve: 'Развитие',
   merge: 'Склейка дублей',
   criteria: 'Критерии',
   calibrate: 'Калибровка',

@@ -10,6 +10,7 @@ import {ErrorLine, PhaseSteps, Timer} from './common'
 import {ParticipantStage} from './participant'
 import {Brand} from './host'
 import {PassportButton} from './passport'
+import {hashKey} from '../core/evolve'
 import {AssumptionsPanel} from './assumptions'
 import {createPortal} from 'preact/compat'
 
@@ -20,6 +21,12 @@ export function JoinApp({roomId, secret}: {roomId: string; secret: string}) {
     const p = lsGet<string>(pidKey, '') || uid()
     lsSet(pidKey, p)
     return p
+  })
+  // Личный ключ: по нему участник находит свои назначения, а другие не могут связать их с ним
+  const [token] = useState(() => {
+    const t = lsGet<string>(`pi:tok:${roomId}`, '') || uid(14)
+    lsSet(`pi:tok:${roomId}`, t)
+    return t
   })
   const [name, setName] = useState(() => lsGet<string>(nameKey, ''))
   const [joined, setJoined] = useState(() => lsGet<boolean>(`pi:joined:${roomId}`, false))
@@ -38,7 +45,8 @@ export function JoinApp({roomId, secret}: {roomId: string; secret: string}) {
         s = new ClientSession(pid, new NostrTransport(tag), k)
         if (cancelled) return
         setSession(s)
-        const r = await s.start(name)
+        // Личный ключ: по нему участник находит свои назначения, а другие не могут связать их с ним
+        const r = await s.start(name, token)
         if (r) setErr(r)
       } catch (e) {
         setErr('Ссылка повреждена или браузер слишком старый. Попробуйте открыть её в Chrome или Safari.')
@@ -110,7 +118,7 @@ export function JoinApp({roomId, secret}: {roomId: string; secret: string}) {
           </div>,
           document.body
         )}
-        {view && session && <ParticipantStage view={view} pid={pid} send={a => session.send(a)} storeKey={`pi:me:${view.stageId}:${pid}`} />}
+        {view && session && <ParticipantStage view={view} pid={pid} send={a => session.send(a)} storeKey={`pi:me:${view.stageId}:${pid}`} assignKey={hashKey(token)} />}
       </div>
     </div>
   )

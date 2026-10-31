@@ -6,6 +6,7 @@ import type {
 import {fromLibrary} from './library'
 import {builtinTemplate, cardTitle, validateCard, type FieldValue, type StageTemplate} from './template'
 import type {ComplianceValue, Passport} from './passport'
+import {EVOLVE_LIMIT, assignEvolve, hashKey, type ParentLink} from './evolve'
 import {autoVerdict, roundAverages, type Assumption, type AssumptionCategory, type AssumptionStatus, type Experiment, type ExperimentMethod, type ThresholdKind} from './assume'
 import {approvalQuota, calibrationSpread, computeResults, pickFinalists, type Results} from './math'
 import {criterionReady} from './lint'
@@ -17,13 +18,13 @@ export const uid = (n = 10) => {
 }
 
 export const DEFAULT_SETTINGS: Settings = {
-  anonymous: true, cardLimit: 3, excludeAuthor: false, calibration: true, secondRound: true, timePreset: 'standard'
+  anonymous: true, cardLimit: 3, excludeAuthor: false, calibration: true, secondRound: true, evolve: true, timePreset: 'standard'
 }
 
 // Минуты на шаг по сценарию (раздел 3 PLAN.md)
 export const TIMINGS: Record<'express' | 'standard', Partial<Record<Phase, number>>> = {
   express: {lobby: 1, generate: 4, merge: 2, criteria: 2, shortlist: 1, rate: 4, results: 3, rate2: 2, decide: 2},
-  standard: {lobby: 2, generate: 8, merge: 4, criteria: 5, calibrate: 2, shortlist: 2, rate: 7, results: 6, rate2: 3, decide: 5}
+  standard: {lobby: 2, generate: 8, evolve: 7, merge: 4, criteria: 5, calibrate: 2, shortlist: 2, rate: 7, results: 6, rate2: 3, decide: 5}
 }
 
 export function createStage(opts: {
@@ -32,7 +33,7 @@ export function createStage(opts: {
   passport?: Passport; assumptions?: Assumption[]; experiments?: Experiment[]; now: number
 }): Stage {
   const settings = {...DEFAULT_SETTINGS, ...opts.settings}
-  if (settings.timePreset === 'express') { settings.calibration = false; settings.secondRound = false }
+  if (settings.timePreset === 'express') { settings.calibration = false; settings.secondRound = false; settings.evolve = false }
   return {
     id: uid(), projectId: opts.projectId, type: opts.template.id, template: structuredClone(opts.template), title: opts.title,
     sourceProblem: opts.sourceProblem, sourceFields: opts.sourceFields, refOptions: opts.refOptions,
@@ -74,7 +75,10 @@ export function realCards(stage: Stage): Card[] {
 
 // Порядок шагов с учётом настроек
 export function phaseFlow(stage: Stage): Phase[] {
-  const f: Phase[] = ['lobby', 'generate', 'merge', 'criteria']
+  const f: Phase[] = ['lobby', 'generate']
+  // «Развитие» имеет смысл, когда есть чужие карточки: минимум 2 карточки и 2 участника
+  if (stage.settings.evolve && realCards(stage).length >= 2 && activeParticipants(stage).length >= 2) f.push('evolve')
+  f.push('merge', 'criteria')
   if (stage.settings.calibration) f.push('calibrate')
   if (realCards(stage).length > 6) f.push('shortlist')
   f.push('rate', 'results', 'decide', 'summary')
@@ -94,10 +98,13 @@ export function submittedCount(stage: Stage, phase: Phase = stage.phase): number
 
 export type Action =
   // участники
-  | {type: 'hello'; name: string}
+  | {type: 'hello'; name: string; token?: string}
   | {type: 'card.upsert'; id: string; fields: Record<string, FieldValue>; basis?: Basis}
   | {type: 'card.delete'; id: string}
   | {type: 'merge.suggest'; a: string; b: string}
+  | {type: 'card.develop'; id: string; parentId: string; fields: Record<string, FieldValue>; basis?: Basis}
+  | {type: 'card.combine'; id: string; parentIds: string[]; fields: Record<string, FieldValue>; basis?: Basis}
+  | {type: 'evolve.done'}
   | {type: 'criterion.propose'; name: string; question: string; anchors: {1: string; 3?: string; 5: string}; tag?: Tag; libraryKey?: string}
   | {type: 'calib.submit'; ratings: {criterionId: string; value: Score | null}[]}
   | {type: 'approve.submit'; cardIds: string[]}
@@ -152,13 +159,24 @@ function markSubmitted(s: Stage, phase: Phase, pid: string) {
   if (!list.includes(pid)) s.submitted[phase] = [...list, pid]
 }
 
-function ensureParticipant(s: Stage, pid: string, name: string, now: number) {
+function ensureParticipant(s: Stage, pid: string, name: string, now: number, token?: string) {
   const p = s.participants.find(x => x.id === pid)
-  if (p) { p.lastSeen = now; p.active = true; if (name.trim()) p.name = name.trim().slice(0, 40); return }
+  if (p) {
+    p.lastSeen = now
+    p.active = true
+    if (name.trim()) p.name = name.trim().slice(0, 40)
+    if (!p.token) p.token = token?.slice(0, 40) || uid(12)
+    return
+  }
   s.participants.push({
     id: pid, name: name.trim().slice(0, 40) || 'Без имени', alias: `Участник ${s.participants.length + 1}`,
-    joinedAt: now, active: true, lastSeen: now
+    joinedAt: now, active: true, lastSeen: now, token: token?.slice(0, 40) || uid(12)
   })
+}
+
+// Ключ, по которому участник находит свои назначения в общем состоянии
+export function participantKey(p: {id: string; token?: string}): string {
+  return hashKey(p.token ?? p.id)
 }
 
 const SCORES = new Set([1, 2, 3, 4, 5])
@@ -170,6 +188,10 @@ function enterPhase(s: Stage, phase: Phase, now: number) {
   s.deadline = deadlineFor(s.settings, phase, now)
   if (phase === 'criteria' && s.criteria.length === 0) {
     s.criteria = s.template.defaultCriteria.map(k => fromLibrary(k, uid()))
+  }
+  if (phase === 'evolve') {
+    s.evolveAssign = assignEvolve(realCards(s).filter(c => !c.parents?.length), activeParticipants(s).map(p => p.id))
+    s.submitted.evolve = []
   }
   if (phase === 'calibrate') {
     s.calibrationCardId = realCards(s)[0]?.id
@@ -196,7 +218,7 @@ export function reduce(stage: Stage, action: Action, actor: string, isHost: bool
 
   switch (action.type) {
     case 'hello':
-      ensureParticipant(s, actor, action.name, now)
+      ensureParticipant(s, actor, action.name, now, action.token)
       break
 
     case 'participant.add':
@@ -211,8 +233,10 @@ export function reduce(stage: Stage, action: Action, actor: string, isHost: bool
 
     case 'card.upsert': {
       if (!me) fail('Сначала войдите в комнату')
-      if (s.phase !== 'generate' && s.phase !== 'lobby') fail('Добавлять карточки можно только на шаге генерации')
       const existing = s.cards.find(c => c.id === action.id)
+      // На шаге «Развитие» можно править только свои новые версии
+      const evolveEdit = s.phase === 'evolve' && !!existing?.parents?.length
+      if (s.phase !== 'generate' && s.phase !== 'lobby' && !evolveEdit) fail('Добавлять карточки можно только на шаге генерации')
       const {values: fields, errors} = validateCard(s.template, action.fields ?? {})
       if (errors.length) fail(errors[0])
       if (existing) {
@@ -220,7 +244,7 @@ export function reduce(stage: Stage, action: Action, actor: string, isHost: bool
         existing.fields = fields
         existing.basis = action.basis
       } else {
-        const mine = s.cards.filter(c => c.authorIds.includes(actor)).length
+        const mine = s.cards.filter(c => c.authorIds.includes(actor) && !c.parents?.length).length
         if (mine >= s.settings.cardLimit) fail(`Лимит — ${s.settings.cardLimit} карточки на человека`)
         s.cards.push({id: action.id, authorIds: [actor], fields, basis: action.basis, mergedFrom: [], createdAt: now})
       }
@@ -228,11 +252,38 @@ export function reduce(stage: Stage, action: Action, actor: string, isHost: bool
     }
 
     case 'card.delete': {
-      if (s.phase !== 'generate' && s.phase !== 'lobby') fail('Удалять карточки можно только на шаге генерации')
       const c = s.cards.find(x => x.id === action.id)
+      if (s.phase !== 'generate' && s.phase !== 'lobby' && !(s.phase === 'evolve' && c?.parents?.length)) fail('Удалять карточки можно только на шаге генерации')
       if (c && (c.authorIds.includes(actor) || isHost)) s.cards = s.cards.filter(x => x !== c)
       break
     }
+
+    case 'card.develop':
+    case 'card.combine': {
+      if (!me) fail('Сначала войдите в комнату')
+      if (s.phase !== 'evolve') fail('Развивать идеи можно только на шаге «Развитие»')
+      const parentIds = action.type === 'card.develop' ? [action.parentId] : [...new Set(action.parentIds)]
+      if (action.type === 'card.combine' && parentIds.length !== 2) fail('Объединяют ровно две карточки')
+      const parents = parentIds.map(id => s.cards.find(c => c.id === id) ?? fail('Исходная карточка не найдена'))
+      if (action.type === 'card.develop' && parents[0].authorIds.includes(actor)) fail('Развивают чужие идеи — свою можно поправить на шаге генерации')
+      if (s.cards.some(c => c.id === action.id)) fail('Такая карточка уже есть')
+      const made = s.cards.filter(c => c.authorIds.includes(actor) && c.parents?.length).length
+      if (made >= EVOLVE_LIMIT) fail(`Не больше ${EVOLVE_LIMIT} новых версий на человека`)
+      const {values: fields, errors} = validateCard(s.template, action.fields ?? {})
+      if (errors.length) fail(errors[0])
+      const kind = action.type === 'card.develop' ? 'develop' : 'combine'
+      s.cards.push({
+        id: action.id.slice(0, 20), authorIds: [actor], fields, basis: action.basis, mergedFrom: [], createdAt: now,
+        parents: parents.map(p => ({id: p.id, kind}))
+      })
+      break
+    }
+
+    case 'evolve.done':
+      if (!me) fail('Сначала войдите в комнату')
+      if (s.phase !== 'evolve') fail('Сейчас не шаг «Развитие»')
+      markSubmitted(s, 'evolve', actor)
+      break
 
     case 'merge.suggest':
       if (s.phase !== 'merge') fail('Предлагать склейку можно только на шаге склейки')
@@ -587,7 +638,7 @@ export function reduce(stage: Stage, action: Action, actor: string, isHost: bool
 }
 
 function phaseIndex(s: Stage, p: Phase): number {
-  const order: Phase[] = ['lobby', 'generate', 'merge', 'criteria', 'calibrate', 'shortlist', 'rate', 'results', 'rate2', 'decide', 'summary']
+  const order: Phase[] = ['lobby', 'generate', 'evolve', 'merge', 'criteria', 'calibrate', 'shortlist', 'rate', 'results', 'rate2', 'decide', 'summary']
   return order.indexOf(p)
 }
 
@@ -644,6 +695,8 @@ export interface PublicCard {
   authorAliases?: string[]
   mergedTexts: Record<string, FieldValue>[]
   mergedIds: string[]
+  num: number
+  parents?: ParentLink[]
 }
 
 export interface PublicView {
@@ -655,6 +708,7 @@ export interface PublicView {
   refOptions?: {id: string; title: string}[]
   passport?: Passport
   compliance: Record<string, Record<string, ComplianceValue>>
+  evolveAssign?: Record<string, string[]>
   assumptions: Assumption[]
   experiments: Experiment[]
   round?: {open: boolean; revealed: boolean; ids: string[]; submitted: string[]; averages?: ReturnType<typeof roundAverages>}
@@ -696,7 +750,9 @@ export function publicView(s: Stage, now: number): PublicView {
     fields: c.fields,
     ...(s.settings.anonymous ? {} : {authorIds: cardAuthors(c), authorAliases: cardAuthors(c).map(alias)}),
     mergedTexts: c.mergedFrom.map(m => m.fields),
-    mergedIds: c.mergedFrom.map(m => m.id)
+    mergedIds: c.mergedFrom.map(m => m.id),
+    num: s.cards.indexOf(c) + 1,
+    parents: c.parents
   })
   // Во время генерации чужие карточки скрыты — видно только их количество
   const hideCards = s.phase === 'lobby' || s.phase === 'generate'
@@ -708,6 +764,11 @@ export function publicView(s: Stage, now: number): PublicView {
   return {
     stageId: s.id, projectId: s.projectId, type: s.type, template: s.template, sourceFields: s.sourceFields, refOptions: s.refOptions,
     passport: s.passport, compliance: s.compliance ?? {},
+    // Назначения — по непрозрачным ключам участников, а не по их id
+    evolveAssign: s.evolveAssign ? Object.fromEntries(Object.entries(s.evolveAssign).map(([pid, ids]) => {
+      const p = s.participants.find(x => x.id === pid)
+      return [p ? participantKey(p) : hashKey(pid), ids]
+    })) : undefined,
     // Авторство предположений скрыто при анонимности; оценки раунда наружу не уходят — только средние после раскрытия
     assumptions: (s.assumptions ?? []).map(a => (s.settings.anonymous ? {...a, authorId: ''} : a)),
     experiments: (s.experiments ?? []).map(e => (s.settings.anonymous ? {...e, authorId: ''} : e)),

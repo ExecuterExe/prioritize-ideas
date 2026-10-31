@@ -11,7 +11,7 @@ let clock = 1_000_000
 const act = (s: Stage, a: Action, actor = HOST, isHost = actor === HOST) => reduce(s, a, actor, isHost, clock++)
 
 function stageWith(people: string[]) {
-  let s = createStage({projectId: 'p', template: builtinTemplate('problem')!, title: 't', settings: {calibration: false, timePreset: 'none'}, now: clock})
+  let s = createStage({projectId: 'p', template: builtinTemplate('problem')!, title: 't', settings: {calibration: false, evolve: false, timePreset: 'none'}, now: clock})
   for (const p of people) s = act(s, {type: 'hello', name: p.toUpperCase()}, p, false)
   return s
 }

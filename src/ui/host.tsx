@@ -1,6 +1,6 @@
 // Приложение организатора: проекты, создание этапа, пульт, режим «Один экран».
 import {useEffect, useMemo, useRef, useState} from 'preact/hooks'
-import {createStage, uid, type Action, type PublicView} from '../core/engine'
+import {createStage, participantKey, uid, type Action, type PublicView} from '../core/engine'
 import {libraryFor} from '../core/library'
 import {BUILTIN_TEMPLATES, BUILTIN_WORKFLOWS, cardSubtitle, cardTitle, isEmpty, type Workflow} from '../core/template'
 import {lintCriteria, criterionReady} from '../core/lint'
@@ -23,6 +23,11 @@ declare const __SINGLE__: boolean
 
 const OPEN_KEY = 'pi:host:open'
 
+function keyOf(stage: Stage, pid: string): string | undefined {
+  const p = stage.participants.find(x => x.id === pid)
+  return p && participantKey(p)
+}
+
 export function Brand() {
   return (
     <span class="brand">
@@ -34,7 +39,7 @@ export function Brand() {
   )
 }
 
-const BLIND_PHASES = new Set(['generate', 'calibrate', 'shortlist', 'rate', 'rate2'])
+const BLIND_PHASES = new Set(['generate', 'evolve', 'calibrate', 'shortlist', 'rate', 'rate2'])
 
 export function HostApp() {
   const [projects, setProjects] = useState<StoredProject[] | null>(null)
@@ -193,7 +198,7 @@ function NewStage({init, onCancel, onCreated}: {
   const [title, setTitle] = useState('')
   const [hostName, setHostName] = useState(p?.hostName ?? '')
   const [mode, setMode] = useState<'network' | 'single'>(__SINGLE__ ? 'single' : p?.mode ?? 'network')
-  const [settings, setSettings] = useState<Partial<Settings>>({timePreset: 'standard', anonymous: true, cardLimit: 3, excludeAuthor: false, calibration: true, secondRound: true})
+  const [settings, setSettings] = useState<Partial<Settings>>({timePreset: 'standard', anonymous: true, cardLimit: 3, excludeAuthor: false, calibration: true, secondRound: true, evolve: true})
   const [passport, setPassport] = useState<Passport>(p?.passport ?? {...EMPTY_PASSPORT})
 
   const workflow: Workflow | undefined = p
@@ -347,6 +352,7 @@ function SettingsFields({settings, onChange}: {settings: Settings; onChange: (p:
     <div class="stack">
       <label class="check"><input type="checkbox" checked={settings.anonymous} onChange={e => onChange({anonymous: (e.target as HTMLInputElement).checked})} />Анонимные авторы карточек</label>
       <label class="check"><input type="checkbox" checked={settings.excludeAuthor} onChange={e => onChange({excludeAuthor: (e.target as HTMLInputElement).checked})} />Не учитывать оценку автора его же карточки</label>
+      <label class="check"><input type="checkbox" checked={!!settings.evolve && !express} disabled={express} onChange={e => onChange({evolve: (e.target as HTMLInputElement).checked})} />Шаг «Развитие» — развить и объединить чужие идеи (7 мин)</label>
       <label class="check"><input type="checkbox" checked={settings.calibration && !express} disabled={express} onChange={e => onChange({calibration: (e.target as HTMLInputElement).checked})} />Калибровка шкал (2 мин)</label>
       <label class="check"><input type="checkbox" checked={settings.secondRound && !express} disabled={express} onChange={e => onChange({secondRound: (e.target as HTMLInputElement).checked})} />Второй раунд по спорным</label>
       <label class="row small">Карточек на человека:
@@ -518,7 +524,7 @@ function StageUI({project, session, transport, joinUrl, onExit, onNextStage}: {
           {tab === 'panel' && (single
             ? <SingleScreen view={view} stage={stage} host={host} asParticipant={asParticipant} project={project} onNextStage={onNextStage} />
             : <HostPanel view={view} stage={stage} host={host} joinUrl={joinUrl} project={project} projector={projector} onNextStage={onNextStage} />)}
-          {tab === 'me' && !single && <ParticipantStage view={view} pid={hostPid} send={asParticipant(hostPid)} storeKey={`pi:me:${stage.id}:${hostPid}`} />}
+          {tab === 'me' && !single && <ParticipantStage view={view} pid={hostPid} send={asParticipant(hostPid)} storeKey={`pi:me:${stage.id}:${hostPid}`} assignKey={keyOf(stage, hostPid)} />}
           {tab === 'diag' && transport && <Diagnostics transport={transport} />}
           {tab === 'assume' && <AssumptionsPanel view={view} send={asParticipant(hostPid)} pid={hostPid} isHost single={single} />}
         </div>
@@ -589,6 +595,14 @@ function HostPanel({view, stage, host, joinUrl, project, projector, onNextStage}
             </div>
           </div>
           {!projector && <details class="card more"><summary>Опоздавшие — QR для входа</summary><div class="row" style={{justifyContent: 'center', marginTop: 8}}><div style={{width: 180}}><QR text={joinUrl} /></div></div></details>}
+        </div>
+      )
+    case 'evolve':
+      return (
+        <div class="stack">
+          <PhaseIntro emoji="🌱" title="Развиваем чужие идеи">Каждому достались 2 чужие карточки: развить, объединить или пропустить. Исходные карточки остаются.</PhaseIntro>
+          <div class="card"><b>Новых версий: {view.cards.filter(c => c.parents?.length).length}</b></div>
+          <Progress view={view} stage={stage} />
         </div>
       )
     case 'merge':
@@ -952,7 +966,7 @@ function SingleScreen({view, stage, host, asParticipant, project, onNextStage}: 
   return (
     <div class="stack">
       <div class="row between"><b>За экраном: {person.name}</b><button class="primary" onClick={() => setCurrent(null)}>Готово, передать следующему</button></div>
-      <ParticipantStage view={view} pid={person.id} send={asParticipant(person.id)} storeKey={`pi:me:${stage.id}:${person.id}`} />
+      <ParticipantStage view={view} pid={person.id} send={asParticipant(person.id)} storeKey={`pi:me:${stage.id}:${person.id}`} assignKey={keyOf(stage, person.id)} />
     </div>
   )
 }

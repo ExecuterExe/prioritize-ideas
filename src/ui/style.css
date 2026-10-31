@@ -533,3 +533,21 @@ button.mini.on { background: var(--sc); color: #fff; border-color: var(--sc); }
 .threat { border-radius: var(--radius-sm); padding: 8px 12px; font-size: .88rem; }
 .threat.bad { background: var(--bad-soft); color: var(--bad); font-weight: 700; }
 .threat.warn { background: var(--warn-soft); color: var(--warn); }
+
+/* ——— Развитие идей и дерево ——— */
+.evolve-editor { border: 1px solid color-mix(in srgb, var(--mint) 55%, var(--border)); box-shadow: 0 0 0 3px color-mix(in srgb, var(--mint) 14%, transparent), var(--shadow); }
+.tree-scroll { overflow-x: auto; padding-bottom: 4px; }
+.tree { display: block; }
+.tree .edge { fill: none; stroke: var(--border); stroke-width: 2; }
+.tree .edge.combine { stroke-dasharray: 6 5; }
+.tree .edge.on { stroke: var(--mint); stroke-width: 3; }
+.tree .node rect { fill: var(--surface-2); stroke: var(--border); stroke-width: 1.5; }
+.tree .node.on rect { fill: color-mix(in srgb, var(--mint-soft) 70%, var(--surface)); stroke: var(--mint); }
+.tree .node.lead rect { stroke: var(--violet); stroke-width: 2.5; }
+.tree .node.sel rect { stroke: var(--violet); stroke-dasharray: 4 3; }
+.tree .n-num { font: 700 12px var(--font-display); fill: var(--violet); }
+.tree .n-score { font: 700 13px var(--font-display); fill: var(--text); }
+.tree .n-title { font: 600 12px var(--font); fill: var(--text); }
+.compare { border-top: 1px dashed var(--border); padding-top: 10px; }
+.diff-add { background: var(--mint-soft); color: var(--mint-deep); border-radius: 4px; }
+.diff-del { background: var(--bad-soft); color: var(--bad); text-decoration: line-through; border-radius: 4px; }

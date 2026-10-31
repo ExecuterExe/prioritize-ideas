@@ -8,6 +8,8 @@ import {lsGet, lsSet} from '../store/db'
 import {AnchorLine, Anchors, Avatars, CardBody, ErrorLine, PhaseIntro, ScoreButtons, Waiting, plural} from './common'
 import {toast} from './toast'
 import {CardForm} from './cardform'
+import {EvolveStep} from './evolve'
+import {hashKey} from '../core/evolve'
 import {ResultsView, SummaryView} from './results'
 import {PassportView} from './passport'
 import {passportFilled} from '../core/passport'
@@ -19,6 +21,7 @@ interface Props {
   pid: string
   send: Send
   storeKey: string // ключ localStorage для черновиков этого участника
+  assignKey?: string // непрозрачный ключ назначений на шаге «Развитие»
 }
 
 interface LocalCard {
@@ -51,7 +54,7 @@ function useLocal(key: string): [Local, (f: (l: Local) => Local) => void] {
 
 const newId = () => Math.random().toString(36).slice(2, 12)
 
-export function ParticipantStage({view, pid, send, storeKey}: Props) {
+export function ParticipantStage({view, pid, send, storeKey, assignKey}: Props) {
   const [local, update] = useLocal(storeKey)
   const myCardIds = useMemo(() => new Set(local.cards.map(c => c.id)), [local.cards])
   const isMine = (c: PublicCard) => myCardIds.has(c.id) || c.mergedIds.some(id => myCardIds.has(id))
@@ -73,6 +76,8 @@ export function ParticipantStage({view, pid, send, storeKey}: Props) {
           <div class="card small muted">Сначала каждый молча пишет свои варианты, потом выбираем критерии и оцениваем вслепую — чужие оценки откроются только в конце.</div>
         </div>
       )
+    case 'evolve':
+      return <EvolveStep view={view} send={send} pid={pid} assignKey={assignKey ?? hashKey(pid)} storeKey={storeKey} />
     case 'generate':
       return <Generate view={view} local={local} update={update} send={send} pid={pid} />
     case 'merge':

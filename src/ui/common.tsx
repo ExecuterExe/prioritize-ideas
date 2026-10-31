@@ -30,7 +30,7 @@ export function Timer({deadline, offset = 0}: {deadline?: number; offset?: numbe
   return <span class={`timer ${left < 0 ? 'over' : left <= 60 ? 'low' : ''}`} title="Осталось времени на шаг">{text}</span>
 }
 
-const STEP_ORDER: Phase[] = ['lobby', 'generate', 'merge', 'criteria', 'calibrate', 'shortlist', 'rate', 'results', 'decide', 'summary']
+const STEP_ORDER: Phase[] = ['lobby', 'generate', 'evolve', 'merge', 'criteria', 'calibrate', 'shortlist', 'rate', 'results', 'decide', 'summary']
 
 // Тонкая линия прогресса вместо ряда из десяти «таблеток»
 export function PhaseSteps({view}: {view: PublicView}) {
@@ -149,6 +149,7 @@ export function CardBody({tpl, card, full = false, refOptions}: {tpl: StageTempl
   return (
     <div>
       <div style={{fontWeight: 600}}>{cardTitle(tpl, card.fields)}</div>
+      {card.parents?.length ? <div class="tiny" style={{color: 'var(--mint-deep)', fontWeight: 700}}>{card.parents[0].kind === 'combine' ? '🔗 объединение идей' : '🌱 развитие идеи'}</div> : null}
       {!full && <div class="muted small">{cardSubtitle(tpl, card.fields)}</div>}
       {full && (
         <div class="small stack" style={{marginTop: 6}}>

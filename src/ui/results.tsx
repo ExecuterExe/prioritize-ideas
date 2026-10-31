@@ -7,6 +7,7 @@ import {ComplianceCheck} from './passport'
 import {complianceItems, passportFilled, passportMarkdown} from '../core/passport'
 import {CATEGORY_SHORT, METHOD_LABEL, STATUS_ICON, STATUS_LABEL, threatsFor} from '../core/assume'
 import {toast} from './toast'
+import {GenealogyTree, originLabel} from './evolve'
 import type {Action} from '../core/engine'
 
 type Send = (a: Action) => Promise<string | null>
@@ -41,6 +42,7 @@ export function ResultsView({view, send, canArgue}: {view: PublicView; send?: Se
               <div class="leader-kicker">🏆 Лидер команды</div>
               <h2 style={{margin: '8px 0 4px', fontSize: '1.35rem'}}>{cardTitle(view.template, leaderCard.fields)}</h2>
               <div class="small">{cardSubtitle(view.template, leaderCard.fields)}</div>
+              {leaderCard.parents?.length ? <div class="small" style={{marginTop: 4}}>🌱 Выросла из чужих идей: {originLabel(leaderCard, view)}</div> : null}
             </div>
             <div class="score-big"><CountUp value={leader.score} /></div>
           </div>
@@ -98,6 +100,7 @@ export function ResultsView({view, send, canArgue}: {view: PublicView; send?: Se
           </div>
         )
       })}
+      <GenealogyTree view={view} />
       {axes && (
         <div class="card">
           <h3>Матрица 2×2</h3>
