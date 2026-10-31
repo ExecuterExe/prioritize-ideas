@@ -3,7 +3,7 @@
 import {useMemo, useState} from 'preact/hooks'
 import type {Action, PublicCard, PublicView} from '../core/engine'
 import {EVOLVE_LIMIT, ancestors, treeDepths, wordDiff} from '../core/evolve'
-import {asText, cardTitle, validateCard, type FieldValue} from '../core/template'
+import {asText, cardTitle, validateCard, type FieldValue, type StageTemplate} from '../core/template'
 import {BASIS_LABEL, type Basis} from '../core/types'
 import {lsGet, lsSet} from '../store/db'
 import {CardForm} from './cardform'
@@ -223,9 +223,39 @@ export function GenealogyTree({view}: {view: PublicView}) {
   )
 }
 
+// Что изменилось в текстовых полях: пословно или «было → стало», если переписано почти всё
+export function FieldDiff({tpl, before, after}: {tpl: StageTemplate; before: Record<string, FieldValue>; after: Record<string, FieldValue>}) {
+  const textFields = tpl.fields.filter(f => f.type === 'text' || f.type === 'longtext')
+  if (textFields.every(f => asText(before[f.key]) === asText(after[f.key]))) return <div class="tiny muted">Текст не менялся</div>
+  return (
+    <>
+      {textFields.map(f => {
+        const a = asText(before[f.key]), b = asText(after[f.key])
+        if (a === b) return null
+        const parts = wordDiff(a, b)
+        const same = parts.filter(x => x.kind === 'same').reduce((n, x) => n + x.text.trim().length, 0)
+        // Если переписано почти всё, пословная подсветка нечитаема — показываем «было → стало»
+        if (same < Math.max(a.length, b.length) * 0.4) {
+          return (
+            <div key={f.key} class="small">
+              <span class="muted">{f.label}: </span>
+              <span class="diff-del">{a || '—'}</span> → <span class="diff-add">{b || '—'}</span>
+            </div>
+          )
+        }
+        return (
+          <div key={f.key} class="small">
+            <span class="muted">{f.label}: </span>
+            {parts.map((part, i) => <span key={i} class={`diff-${part.kind}`}>{part.text}</span>)}
+          </div>
+        )
+      })}
+    </>
+  )
+}
+
 function VersionCompare({child, view}: {child: PublicCard; view: PublicView}) {
   const tpl = view.template
-  const textFields = tpl.fields.filter(f => f.type === 'text' || f.type === 'longtext')
   return (
     <div class="stack compare">
       <b>№{child.num} — {originLabel(child, view)}</b>
@@ -235,28 +265,7 @@ function VersionCompare({child, view}: {child: PublicCard; view: PublicView}) {
         return (
           <div key={p.id} class="stack" style={{gap: 6}}>
             <div class="tiny muted">Что изменилось относительно №{parent.num}:</div>
-            {textFields.map(f => {
-              const a = asText(parent.fields[f.key]), b = asText(child.fields[f.key])
-              if (a === b) return null
-              const parts = wordDiff(a, b)
-              const same = parts.filter(x => x.kind === 'same').reduce((n, x) => n + x.text.trim().length, 0)
-              // Если переписано почти всё, пословная подсветка нечитаема — показываем «было → стало»
-              if (same < Math.max(a.length, b.length) * 0.4) {
-                return (
-                  <div key={f.key} class="small">
-                    <span class="muted">{f.label}: </span>
-                    <span class="diff-del">{a || '—'}</span> → <span class="diff-add">{b || '—'}</span>
-                  </div>
-                )
-              }
-              return (
-                <div key={f.key} class="small">
-                  <span class="muted">{f.label}: </span>
-                  {parts.map((part, i) => <span key={i} class={`diff-${part.kind}`}>{part.text}</span>)}
-                </div>
-              )
-            })}
-            {textFields.every(f => asText(parent.fields[f.key]) === asText(child.fields[f.key])) && <div class="tiny muted">Текст не менялся</div>}
+            <FieldDiff tpl={tpl} before={parent.fields} after={child.fields} />
           </div>
         )
       })}

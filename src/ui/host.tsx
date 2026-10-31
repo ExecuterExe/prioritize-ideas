@@ -27,6 +27,7 @@ import {FREE_TEMPLATES, FULL_SETTINGS, GOALS, QUICK_SETTINGS, goalOf, goalWorkfl
 import {planBranch, routeChain, type PathChoice, type PathStep} from '../core/route'
 import {WhatNextSheet} from './whatnext'
 import {Pulse} from './pulse'
+import {CardMarks, CardMenu, EditCardSheet, HistorySheet} from './cardmenu'
 import {openScreen, screenSupported, useScreenFeed} from './screen'
 
 declare const __SINGLE__: boolean
@@ -180,10 +181,15 @@ function Home({projects, onOpen, onNew, onNewStage, onChanged, onTemplates}: {
 
 // Карточки прошлых этапов, на которые можно опереться: выбранные и отложенные
 function priorCards(p?: StoredProject) {
-  return (p?.stages ?? []).flatMap(st => st.decisions
-    .filter(d => d.status === 'chosen' || d.status === 'deferred')
-    .map(d => ({stage: st, card: st.cards.find(c => c.id === d.cardId)!, status: d.status}))
-    .filter(x => x.card))
+  return (p?.stages ?? []).flatMap(st => {
+    const decided = st.decisions
+      .filter(d => d.status === 'chosen' || d.status === 'deferred')
+      .map(d => ({stage: st, card: st.cards.find(c => c.id === d.cardId)!, status: d.status as 'chosen' | 'deferred' | 'carry'}))
+    // Отмеченные «взять в следующий этап» прямо на карточке
+    const carried = (st.carry ?? []).filter(id => !decided.some(x => x.card?.id === id))
+      .map(id => ({stage: st, card: st.cards.find(c => c.id === id)!, status: 'carry' as const}))
+    return [...decided, ...carried].filter(x => x.card)
+  })
 }
 
 type StageOpts = Omit<Parameters<typeof createStage>[0], 'projectId' | 'now' | 'passport' | 'assumptions' | 'experiments' | 'tasks'>
@@ -480,7 +486,7 @@ function NewStage({init, prefill, onCancel, onCreated}: {
                 setSourceProblem(srcText(prior.find(x => `${x.stage.id}:${x.card.id}` === v)))
               }}>
                 <option value="">— без исходной карточки —</option>
-                {prior.map(x => <option key={`${x.stage.id}:${x.card.id}`} value={`${x.stage.id}:${x.card.id}`}>{x.status === 'chosen' ? '✅' : '⏸'} {x.stage.template.emoji} {cardTitle(x.stage.template, x.card.fields)}</option>)}
+                {prior.map(x => <option key={`${x.stage.id}:${x.card.id}`} value={`${x.stage.id}:${x.card.id}`}>{x.status === 'chosen' ? '✅' : x.status === 'carry' ? '↗' : '⏸'} {x.stage.template.emoji} {cardTitle(x.stage.template, x.card.fields)}</option>)}
               </select>
             </label>
           )}
@@ -988,9 +994,16 @@ function MergePanel({view, host}: {view: PublicView; host: (a: Action) => string
   const [pick, setPick] = useState<string | null>(null)
   const title = (id: string) => { const c = view.cards.find(x => x.id === id); return c ? cardTitle(view.template, c.fields) : '?' }
   const merge = (into: string, from: string) => { host({type: 'merge', into, from}); setPick(null) }
+  const [editing, setEditing] = useState<string | null>(null)
+  const [history, setHistory] = useState<string | null>(null)
+  const byId = (id: string | null) => view.cards.find(c => c.id === id)
+  // Закреплённые — наверху
+  const cards = [...view.cards].sort((a, b) => Number(view.pinned.includes(b.id)) - Number(view.pinned.includes(a.id)))
   return (
     <div class="stack">
-      <PhaseIntro emoji="🧩" title="Склеиваем дубли">Перетащите карточку на похожую — или «Склеить с…». Отменить можно до оценки.</PhaseIntro>
+      <PhaseIntro emoji="🧩" title="Склеиваем дубли">Перетащите карточку на похожую — или «Склеить с…». В меню «⋯» — уточнить формулировку, закрепить, дублировать. Отменить можно до оценки.</PhaseIntro>
+      {editing && byId(editing) && <EditCardSheet view={view} card={byId(editing)!} host={host} onClose={() => setEditing(null)} />}
+      {history && byId(history) && <HistorySheet view={view} card={byId(history)!} host={host} onClose={() => setHistory(null)} />}
       {view.mergeSuggestions.length > 0 && (
         <div class="card stack">
           <h3>Участники предлагают склеить</h3>
@@ -1003,13 +1016,15 @@ function MergePanel({view, host}: {view: PublicView; host: (a: Action) => string
         </div>
       )}
       <div class="grid">
-        {view.cards.map(c => (
-          <div key={c.id} class={`card merge-card ${over === c.id ? 'drag-over' : ''}`} draggable
+        {cards.map(c => (
+          <div key={c.id} class={`card merge-card ${over === c.id ? 'drag-over' : ''} ${view.pinned.includes(c.id) ? 'pinned' : ''}`} draggable
             onDragStart={() => setDrag(c.id)} onDragEnd={() => { setDrag(null); setOver(null) }}
             onDragOver={e => { e.preventDefault(); if (drag && drag !== c.id) setOver(c.id) }}
             onDragLeave={() => setOver(null)}
             onDrop={e => { e.preventDefault(); if (drag && drag !== c.id) merge(c.id, drag); setOver(null) }}>
+            <CardMenu view={view} card={c} host={host} onEdit={() => setEditing(c.id)} onHistory={() => setHistory(c.id)} />
             <CardBody tpl={view.template} refOptions={view.refOptions} card={c} full />
+            <CardMarks view={view} card={c} onHistory={() => setHistory(c.id)} />
             <div class="row" style={{marginTop: 8}}>
               {pick === null && <button class="small" onClick={() => setPick(c.id)}>Склеить с…</button>}
               {pick === c.id && <button class="small" onClick={() => setPick(null)}>Отмена</button>}

@@ -134,6 +134,11 @@ export type Action =
   | {type: 'task.update'; id: string; patch: Partial<Pick<Task, 'title' | 'ownerId' | 'deadline' | 'done'>>}
   | {type: 'task.delete'; id: string}
   | {type: 'card.delete'; id: string}
+  | {type: 'card.edit'; id: string; fields: Record<string, FieldValue>}
+  | {type: 'card.restore'; id: string; at: number}
+  | {type: 'card.pin'; id: string; on: boolean}
+  | {type: 'card.duplicate'; id: string; newId: string}
+  | {type: 'card.carry'; id: string; on: boolean}
   | {type: 'merge.suggest'; a: string; b: string}
   | {type: 'card.develop'; id: string; parentId: string; fields: Record<string, FieldValue>; basis?: Basis}
   | {type: 'card.combine'; id: string; parentIds: string[]; fields: Record<string, FieldValue>; basis?: Basis}
@@ -178,7 +183,8 @@ export type Action =
   | {type: 'experiment.delete'; id: string}
 
 export const HOST_ONLY = new Set<Action['type']>([
-  'phase.next', 'phase.back', 'deadline.extend', 'session.hostScreen', 'merge', 'unmerge', 'suggestion.dismiss', 'criterion.addLibrary',
+  'phase.next', 'phase.back', 'deadline.extend', 'session.hostScreen',
+  'card.edit', 'card.restore', 'card.pin', 'card.duplicate', 'card.carry', 'merge', 'unmerge', 'suggestion.dismiss', 'criterion.addLibrary',
   'criterion.update', 'criterion.remove', 'criterion.addCustom', 'settings.update', 'participant.setActive',
   'participant.add', 'participant.rename', 'calib.reveal', 'round2.start', 'decision.set',
   'passport.update', 'compliance.set', 'criterion.addFromPassport', 'round.open', 'round.reveal', 'round.close',
@@ -245,8 +251,17 @@ function enterPhase(s: Stage, phase: Phase, now: number, carry = false) {
   if (phase === 'rate' && s.finalists.length === 0) s.finalists = realCards(s).map(c => c.id)
 }
 
+const EDIT_PHASES: Phase[] = ['merge', 'criteria', 'calibrate', 'shortlist']
+const PIN_PHASES: Phase[] = ['merge', 'criteria', 'calibrate', 'shortlist']
+export const HISTORY_LIMIT = 5
+
 function leavePhase(s: Stage, from: Phase) {
-  if (from === 'shortlist') s.finalists = pickFinalists(realCards(s).map(c => c.id), s.approvals)
+  if (from === 'shortlist') {
+    // Закреплённые ведущим карточки идут в оценку при любом голосовании
+    const picked = pickFinalists(realCards(s).map(c => c.id), s.approvals)
+    const pinned = (s.pinned ?? []).filter(id => realCards(s).some(c => c.id === id) && !picked.includes(id))
+    s.finalists = [...picked, ...pinned]
+  }
   if (from === 'criteria') {
     // Неготовые свои критерии (без описаний 1 и 5) не попадают в оценку
     s.criteria = s.criteria.filter(c => c.approved && criterionReady(c))
@@ -504,12 +519,58 @@ export function reduce(stage: Stage, action: Action, actor: string, isHost: bool
       s.mergeSuggestions = s.mergeSuggestions.filter(m => !(m.a === action.a && m.b === action.b))
       break
 
+    case 'card.edit':
+    case 'card.restore': {
+      if (!EDIT_PHASES.includes(s.phase)) fail('Уточнять формулировки можно до начала оценки')
+      const c = s.cards.find(x => x.id === action.id) ?? fail('Карточка не найдена')
+      let fields: Record<string, FieldValue>
+      if (action.type === 'card.edit') {
+        const r = validateCard(s.template, action.fields ?? {})
+        if (r.errors.length) fail(r.errors[0])
+        fields = r.values
+      } else {
+        fields = (c.history ?? []).find(v => v.at === action.at)?.fields ?? fail('Нет такой версии')
+      }
+      if (JSON.stringify(fields) === JSON.stringify(c.fields)) break
+      c.history = [...(c.history ?? []).filter(v => action.type !== 'card.restore' || v.at !== action.at), {fields: c.fields, at: now}].slice(-HISTORY_LIMIT)
+      c.fields = structuredClone(fields)
+      break
+    }
+
+    case 'card.pin': {
+      if (!PIN_PHASES.includes(s.phase)) fail('Закреплять можно до начала оценки')
+      if (!s.cards.some(c => c.id === action.id)) fail('Карточка не найдена')
+      const rest = (s.pinned ?? []).filter(id => id !== action.id)
+      s.pinned = action.on ? [...rest, action.id] : rest
+      break
+    }
+
+    case 'card.duplicate': {
+      if (s.phase !== 'merge') fail('Дублировать можно на шаге склейки')
+      const c = s.cards.find(x => x.id === action.id) ?? fail('Карточка не найдена')
+      if (s.cards.some(x => x.id === action.newId)) break
+      s.cards.splice(s.cards.indexOf(c) + 1, 0, {id: action.newId.slice(0, 20), authorIds: [], fields: structuredClone(c.fields), mergedFrom: [], createdAt: now})
+      break
+    }
+
+    case 'card.carry': {
+      if (s.phase === 'lobby' || s.phase === 'generate') fail('Карточки ещё скрыты')
+      if (!s.cards.some(c => c.id === action.id)) fail('Карточка не найдена')
+      const rest = (s.carry ?? []).filter(id => id !== action.id)
+      s.carry = action.on ? [...rest, action.id] : rest
+      break
+    }
+
     case 'merge': {
       if (s.phase !== 'merge') fail('Склеивать можно только на шаге склейки')
       if (action.into === action.from) break
       const into = s.cards.find(c => c.id === action.into) ?? fail('Карточка не найдена')
       const from = s.cards.find(c => c.id === action.from) ?? fail('Карточка не найдена')
       into.mergedFrom.push({...from, mergedFrom: []}, ...from.mergedFrom)
+      // Метки склеенной карточки переходят на итоговую
+      for (const key of ['pinned', 'carry'] as const) {
+        if (s[key]?.includes(from.id)) s[key] = [...new Set(s[key]!.filter(id => id !== from.id).concat(into.id))]
+      }
       s.cards = s.cards.filter(c => c !== from)
       s.mergeSuggestions = s.mergeSuggestions.filter(m => m.a !== from.id && m.b !== from.id)
       break
@@ -916,6 +977,7 @@ export interface PublicCard {
   num: number
   parents?: ParentLink[]
   stepId?: string
+  history?: {fields: Record<string, FieldValue>; at: number}[]
 }
 
 export interface PublicView {
@@ -959,6 +1021,8 @@ export interface PublicView {
   args: Arg[]
   decisions: Decision[]
   mergeSuggestions: {a: string; b: string}[]
+  pinned: string[]
+  carry: string[]
   disputedForRound2: string[]
   round2Done: boolean
   progress: Record<string, boolean>
@@ -979,7 +1043,8 @@ export function publicView(s: Stage, now: number): PublicView {
     mergedIds: c.mergedFrom.map(m => m.id),
     num: s.cards.indexOf(c) + 1,
     stepId: c.stepId,
-    parents: c.parents
+    parents: c.parents,
+    ...(c.history?.length ? {history: c.history} : {})
   })
   // Во время генерации чужие карточки скрыты — видно только их количество
   const hideCards = s.phase === 'lobby' || s.phase === 'generate'
@@ -1036,6 +1101,7 @@ export function publicView(s: Stage, now: number): PublicView {
     args: s.args,
     decisions: s.decisions,
     mergeSuggestions: s.mergeSuggestions.map(({a, b}) => ({a, b})),
+    pinned: hideCards ? [] : s.pinned ?? [], carry: hideCards ? [] : s.carry ?? [],
     disputedForRound2: s.disputedForRound2,
     round2Done: s.round2Done,
     progress,

@@ -58,6 +58,12 @@ export interface Card {
   sample?: boolean
   parents?: ParentLink[]
   stepId?: string // режим «Карта пути»: к какому шагу относится барьер
+  history?: CardVersion[] // прошлые формулировки после правок ведущего (до 5)
+}
+
+export interface CardVersion {
+  fields: Record<string, FieldValue>
+  at: number
 }
 
 export interface Criterion {
@@ -116,6 +122,8 @@ export interface MergeSuggestion {
 
 export interface Stage {
   id: string
+  pinned?: string[] // закреплённые карточки: наверху и точно идут в оценку
+  carry?: string[] // отмечены «взять в следующий этап»
   carried?: number // мс, перенесённые с прошлого шага (закончили раньше)
   hostScreen?: boolean // Wi-Fi подвёл: сессия идёт на ноутбуке ведущего
   projectId: string

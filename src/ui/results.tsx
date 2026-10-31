@@ -175,6 +175,9 @@ export function buildMarkdown(view: PublicView, projectTitle: string, route: str
   L.push(`# ${projectTitle} — ${view.template.name}`, '')
   if (view.sourceProblem) L.push(`**Исходим из:** ${view.sourceProblem}`, '')
   if (route.length > 1) L.push('## Как мы пришли к решению', '', ...route.map((r, i) => `${i + 1}. ${r}`), '')
+  const marked = (ids: string[]) => ids.map(id => view.cards.find(c => c.id === id)).filter(c => !!c).map(c => cardTitle(view.template, c!.fields)).join('; ')
+  if (view.pinned.length) L.push(`**📌 Закреплено ведущим:** ${marked(view.pinned)}`, '')
+  if (view.carry.length) L.push(`**↗ Берём в следующий этап:** ${marked(view.carry)}`, '')
   if (passportFilled(view.passport)) L.push(passportMarkdown(view.passport!), '')
   L.push(`Участников: ${view.participants.filter(p => p.active).length}. Критерии: ${crit.map(c => `${c.name}${c.weight > 1 ? ` (вес ${c.weight})` : ''}`).join(', ')}.`, '')
   const title = (id: string) => {
