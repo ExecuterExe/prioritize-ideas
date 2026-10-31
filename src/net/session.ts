@@ -11,6 +11,11 @@ type Msg =
   | {k: 'ack'; to: string; seq: number; err?: string; ver?: number}
   | {k: 'state'; v: PublicView}
   | {k: 'sync'; from: string}
+  | {k: 'ping'; from: string}
+
+// Как часто телефон сообщает «я здесь»; ведущий считает пропавшим после PRESENCE_TIMEOUT
+const PING_EVERY = 15_000
+export const PRESENCE_TIMEOUT = 40_000
 
 const CHUNK = 9000
 
@@ -57,6 +62,8 @@ export class HostSession {
   readonly stage = signal<Stage>(null as unknown as Stage)
   readonly view = signal<PublicView>(null as unknown as PublicView)
   readonly netStatus = signal<TransportStatus>('offline')
+  // Когда последний раз слышали каждого участника (только у ведущего, наружу не уходит)
+  readonly seen = signal<Record<string, number>>({})
   private channel?: Channel
   private acks = new Map<string, Msg>()
   private broadcastTimer?: ReturnType<typeof setTimeout>
@@ -105,6 +112,8 @@ export class HostSession {
   }
 
   private receive(m: Msg) {
+    if (m.k === 'sync' || m.k === 'ping' || m.k === 'act') this.seen.value = {...this.seen.value, [m.from]: Date.now()}
+    if (m.k === 'ping') return
     if (m.k === 'sync') { this.scheduleBroadcast(50); return }
     if (m.k !== 'act') return
     const id = `${m.from}:${m.seq}`
@@ -192,8 +201,10 @@ export class ClientSession {
     this.netStatus.value = this.transport.status()
     if (typeof document !== 'undefined') document.addEventListener('visibilitychange', this.onVisible)
     // Пока нет состояния — просим его раз в 4 секунды; потом раз в 20 секунд для проверки связи
+    let lastPing = Date.now()
     this.syncTimer = setInterval(() => {
       if (!this.view.value || Date.now() - this.hostSeen.value > 20_000) this.requestSync()
+      else if (Date.now() - lastPing >= PING_EVERY) { lastPing = Date.now(); void this.channel.send({k: 'ping', from: this.pid}) }
     }, 4000)
     this.requestSync()
     return this.send({type: 'hello', name, token})

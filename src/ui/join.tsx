@@ -131,7 +131,13 @@ export function JoinApp({roomId, secret}: {roomId: string; secret: string}) {
           </div>,
           document.body
         )}
-        {view && session && <ParticipantStage view={view} pid={pid} send={a => session.send(a)} storeKey={`pi:me:${view.stageId}:${pid}`} assignKey={hashKey(token)} />}
+        {view?.hostScreen && (
+          <div class="card stack center">
+            <h2>📴 Сессия на экране ведущего</h2>
+            <div class="muted">Связь подвела, поэтому команда продолжает на ноутбуке организатора по очереди. Подойдите, когда позовут. Ваши черновики сохранены — когда телефоны вернут, экран оживёт сам.</div>
+          </div>
+        )}
+        {view && session && !view.hostScreen && <ParticipantStage view={view} pid={pid} send={a => session.send(a)} storeKey={`pi:me:${view.stageId}:${pid}`} assignKey={hashKey(token)} />}
       </div>
     </div>
   )

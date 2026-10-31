@@ -624,3 +624,15 @@ details.menu[open] > summary { background: var(--surface-2); }
 .next-option small { display: block; color: var(--muted); font-weight: 600; }
 .next-emoji { font-size: 1.3rem; line-height: 1.2; }
 .route { font-size: .8rem; }
+
+/* Пульт ведущего */
+.pulse { display: flex; flex-direction: column; gap: 10px; padding: 12px 16px; }
+.pulse-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; }
+.pulse-people { display: flex; flex-wrap: wrap; gap: 6px; }
+.pulse-person { position: relative; display: inline-flex; }
+.pulse-mark { position: absolute; right: -4px; bottom: -4px; min-width: 16px; height: 16px; padding: 0 3px; border-radius: 999px; font-size: 10px; line-height: 16px; text-align: center; background: var(--surface); box-shadow: var(--shadow); }
+.pulse-person.done .pulse-mark { background: var(--ok); color: #fff; }
+.pulse-person.away .pulse-mark { background: var(--bad-soft); }
+.pulse-person.here .pulse-mark { color: var(--ok); }
+.pulse-facts { display: flex; flex-wrap: wrap; gap: 6px; }
+.pulse-alert { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; padding: 8px 12px; border-radius: var(--radius-sm); background: var(--warn-soft); font-size: .9rem; font-weight: 600; }

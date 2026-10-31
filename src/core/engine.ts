@@ -14,6 +14,7 @@ import {BARRIER_LIMIT, emotionStats, emptyJourney, type EmotionStat, type Journe
 import {autoVerdict, roundAverages, type Assumption, type AssumptionCategory, type AssumptionStatus, type Experiment, type ExperimentMethod, type ThresholdKind} from './assume'
 import {approvalQuota, calibrationSpread, computeResults, pickFinalists, type Results} from './math'
 import {criterionReady} from './lint'
+import {TIMINGS, carryOver} from './timing'
 
 export const uid = (n = 10) => {
   const a = new Uint8Array(n)
@@ -25,11 +26,8 @@ export const DEFAULT_SETTINGS: Settings = {
   anonymous: true, cardLimit: 3, excludeAuthor: false, calibration: true, secondRound: true, evolve: true, timePreset: 'standard'
 }
 
-// Минуты на шаг по сценарию (раздел 3 PLAN.md)
-export const TIMINGS: Record<'express' | 'standard', Partial<Record<Phase, number>>> = {
-  express: {lobby: 1, steps: 2, generate: 4, merge: 2, criteria: 2, shortlist: 1, rate: 4, results: 3, rate2: 2, decide: 2},
-  standard: {lobby: 2, steps: 4, generate: 8, evolve: 7, merge: 4, criteria: 5, calibrate: 2, shortlist: 2, rate: 7, results: 6, rate2: 3, decide: 5}
-}
+// Минуты на шаг по сценарию (раздел 3 PLAN.md) — в timing.ts
+export {TIMINGS}
 
 export function createStage(opts: {
   projectId: string; template: StageTemplate; title: string; settings?: Partial<Settings>
@@ -149,6 +147,7 @@ export type Action =
   | {type: 'phase.next'}
   | {type: 'phase.back'}
   | {type: 'deadline.extend'; minutes: number}
+  | {type: 'session.hostScreen'; on: boolean}
   | {type: 'merge'; into: string; from: string}
   | {type: 'unmerge'; id: string; childId: string}
   | {type: 'suggestion.dismiss'; a: string; b: string}
@@ -179,7 +178,7 @@ export type Action =
   | {type: 'experiment.delete'; id: string}
 
 export const HOST_ONLY = new Set<Action['type']>([
-  'phase.next', 'phase.back', 'deadline.extend', 'merge', 'unmerge', 'suggestion.dismiss', 'criterion.addLibrary',
+  'phase.next', 'phase.back', 'deadline.extend', 'session.hostScreen', 'merge', 'unmerge', 'suggestion.dismiss', 'criterion.addLibrary',
   'criterion.update', 'criterion.remove', 'criterion.addCustom', 'settings.update', 'participant.setActive',
   'participant.add', 'participant.rename', 'calib.reveal', 'round2.start', 'decision.set',
   'passport.update', 'compliance.set', 'criterion.addFromPassport', 'round.open', 'round.reveal', 'round.close',
@@ -219,10 +218,14 @@ export function participantKey(p: {id: string; token?: string}): string {
 const SCORES = new Set([1, 2, 3, 4, 5])
 const validScore = (v: unknown) => v === null || SCORES.has(v as number)
 
-function enterPhase(s: Stage, phase: Phase, now: number) {
+function enterPhase(s: Stage, phase: Phase, now: number, carry = false) {
+  // Закончили шаг раньше — остаток времени переходит на следующий
+  const extra = carry ? carryOver(s.deadline, now) : 0
   s.phase = phase
   s.phaseStartedAt = now
   s.deadline = deadlineFor(s.settings, phase, now)
+  s.carried = s.deadline && extra ? extra : undefined
+  if (s.deadline && extra) s.deadline += extra
   if (phase === 'criteria' && s.criteria.length === 0) {
     s.criteria = s.template.defaultCriteria.map(k => fromLibrary(k, uid()))
   }
@@ -806,6 +809,10 @@ export function reduce(stage: Stage, action: Action, actor: string, isHost: bool
       break
     }
 
+    case 'session.hostScreen':
+      s.hostScreen = action.on || undefined
+      break
+
     case 'deadline.extend':
       s.deadline = Math.max(s.deadline ?? now, now) + action.minutes * 60_000
       break
@@ -822,7 +829,7 @@ export function reduce(stage: Stage, action: Action, actor: string, isHost: bool
       const i = flow.indexOf(s.phase)
       if (i < 0 || i === flow.length - 1) break
       leavePhase(s, s.phase)
-      enterPhase(s, flow[i + 1], now)
+      enterPhase(s, flow[i + 1], now, true)
       break
     }
 
@@ -913,6 +920,8 @@ export interface PublicCard {
 
 export interface PublicView {
   stageId: string
+  carried?: number // мс запаса, перенесённые с прошлого шага
+  hostScreen: boolean // сессия временно идёт на экране ведущего
   projectId: string
   type: StageType
   template: StageTemplate
@@ -1010,6 +1019,7 @@ export function publicView(s: Stage, now: number): PublicView {
     },
     title: s.title, sourceProblem: s.sourceProblem,
     settings: s.settings, phase: s.phase, flow: phaseFlow(s), deadline: s.deadline, hostTime: now, version: s.version,
+    carried: s.carried, hostScreen: !!s.hostScreen,
     participants: s.participants.map(p => ({id: p.id, name: p.name, alias: p.alias, active: p.active})),
     cardCounts,
     cards: hideCards ? [] : s.cards.map(toPublic),

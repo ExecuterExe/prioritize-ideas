@@ -26,6 +26,7 @@ import {ThreatNote} from './results'
 import {FREE_TEMPLATES, FULL_SETTINGS, GOALS, QUICK_SETTINGS, goalOf, goalWorkflow, visibleTools} from '../core/quickstart'
 import {planBranch, routeChain, type PathChoice, type PathStep} from '../core/route'
 import {WhatNextSheet} from './whatnext'
+import {Pulse} from './pulse'
 
 declare const __SINGLE__: boolean
 
@@ -658,7 +659,13 @@ function StageUI({project, session, transport, joinUrl, onExit, onNextStage, onB
 }) {
   const view = session.view.value
   const stage = session.stage.value
-  const single = project.mode === 'single' || __SINGLE__
+  // Сеть есть у проекта «С телефонов»; «на экране ведущего» — временный один экран поверх неё
+  const network = project.mode === 'network' && !__SINGLE__
+  const single = !network || !!stage.hostScreen
+  const goHostScreen = () => {
+    if (!confirm('Продолжить на этом ноутбуке по очереди? Телефоны увидят «сессия на экране ведущего». Вернуть телефоны можно в любой момент.')) return
+    if (!host({type: 'session.hostScreen', on: true})) { setTab('panel'); toast('Работаем на одном экране') }
+  }
   const [tab, setTab] = useState<Tab>('panel')
   const [projector, setProjector] = useState(false)
   const [editPassport, setEditPassport] = useState(false)
@@ -708,7 +715,7 @@ function StageUI({project, session, transport, joinUrl, onExit, onNextStage, onB
             </span>
           )}
           {showsProgress && <Ring value={submitted} total={active.length} size={40} />}
-          {!single && <span title={`Связь: ${session.netStatus.value === 'online' ? 'отличная' : session.netStatus.value === 'degraded' ? 'слабая' : 'нет'}`}><span class={`dot ${session.netStatus.value}`} /></span>}
+          {network && <span title={`Связь: ${session.netStatus.value === 'online' ? 'отличная' : session.netStatus.value === 'degraded' ? 'слабая' : 'нет'}`}><span class={`dot ${session.netStatus.value}`} /></span>}
           {view.canGoBack && <button class="ghost icon-btn no-print" title="Вернуться на шаг назад" aria-label="Назад" onClick={() => host({type: 'phase.back'})}>↶</button>}
           {view.advanceBlock && view.phase !== 'summary' && <span class="block-hint no-print">{view.advanceBlock}</span>}
           {WHAT_NEXT_PHASES.includes(view.phase) && (
@@ -755,7 +762,7 @@ function StageUI({project, session, transport, joinUrl, onExit, onNextStage, onB
               {!single && <button class={tab === 'me' ? 'on' : ''} onClick={() => setTab('me')}>Мой голос{myTurn ? ' •' : ''}</button>}
               {(tools.assume || tab === 'assume') && <button class={tab === 'assume' ? 'on' : ''} onClick={() => setTab('assume')}>🎯 Предположения{view.assumptions.length ? ` (${view.assumptions.length})` : ''}{view.round?.open ? ' •' : ''}</button>}
               {(tools.tasks || tab === 'tasks') && <button class={tab === 'tasks' ? 'on' : ''} onClick={() => setTab('tasks')}>📋 Задачи{openTasks ? ` (${openTasks})` : ''}</button>}
-              {!single && <button class={tab === 'diag' ? 'on' : ''} onClick={() => setTab('diag')}>Связь</button>}
+              {network && <button class={tab === 'diag' ? 'on' : ''} onClick={() => setTab('diag')}>Связь</button>}
             </div>
             <span class="row" style={{gap: 4}}>
               {(!tools.assume || !tools.tasks) && (
@@ -778,12 +785,32 @@ function StageUI({project, session, transport, joinUrl, onExit, onNextStage, onB
             Вы тоже участник — ваш ход во вкладке «Мой голос» →
           </button>
         )}
+        {stage.hostScreen && (
+          <div class="pulse-alert no-print">
+            <span>📴 Сессия идёт на этом ноутбуке — телефоны ждут. Связь вернулась?</span>
+            <button class="small primary" onClick={() => { if (!host({type: 'session.hostScreen', on: false})) toast('Телефоны снова в игре') }}>📱 Вернуть телефоны</button>
+          </div>
+        )}
+        {tab === 'panel' && !projector && !['lobby', 'summary'].includes(view.phase) && view.template.mode !== 'journey' && (
+          <Pulse view={view} stage={stage} host={host} hostPid={hostPid} seen={session.seen.value} network={network && !stage.hostScreen} onHostScreen={goHostScreen} />
+        )}
         <div class="phase-enter" key={`${view.phase}-${tab}`}>
           {tab === 'panel' && (single
             ? <SingleScreen view={view} stage={stage} host={host} asParticipant={asParticipant} project={project} onNextStage={onNextStage} />
             : <HostPanel view={view} stage={stage} host={host} joinUrl={joinUrl} project={project} projector={projector} onNextStage={onNextStage} />)}
           {tab === 'me' && !single && <ParticipantStage view={view} pid={hostPid} send={asParticipant(hostPid)} storeKey={`pi:me:${stage.id}:${hostPid}`} assignKey={keyOf(stage, hostPid)} />}
-          {tab === 'diag' && transport && <Diagnostics transport={transport} />}
+          {tab === 'diag' && transport && (
+            <div class="stack">
+              <Diagnostics transport={transport} />
+              {!stage.hostScreen && (
+                <div class="card stack">
+                  <b>Связь не работает у команды?</b>
+                  <div class="small muted">Продолжите на этом ноутбуке по очереди: чужие ответы скрыты «шторкой», всё собранное остаётся.</div>
+                  <div><button onClick={goHostScreen}>📴 Перейти на один экран</button></div>
+                </div>
+              )}
+            </div>
+          )}
           {tab === 'tasks' && <TasksPanel view={view} send={asParticipant(hostPid)} pid={hostPid} isHost title={project.title} />}
           {tab === 'assume' && <AssumptionsPanel view={view} send={asParticipant(hostPid)} pid={hostPid} isHost single={single} />}
         </div>

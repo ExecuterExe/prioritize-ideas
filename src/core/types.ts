@@ -116,6 +116,8 @@ export interface MergeSuggestion {
 
 export interface Stage {
   id: string
+  carried?: number // мс, перенесённые с прошлого шага (закончили раньше)
+  hostScreen?: boolean // Wi-Fi подвёл: сессия идёт на ноутбуке ведущего
   projectId: string
   type: StageType
   template: StageTemplate
