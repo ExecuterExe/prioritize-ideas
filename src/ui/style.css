@@ -706,3 +706,14 @@ kbd { display: inline-block; min-width: 26px; padding: 2px 8px; border-radius: 6
 .completeness { box-shadow: 0 0 0 2px var(--mint), var(--shadow); }
 .check-row { padding: 10px 12px; border-radius: var(--radius-sm); background: var(--surface-2); gap: 6px; }
 .blind-spots { padding: 10px 12px; border-radius: var(--radius-sm); background: var(--warn-soft); }
+
+/* Круг и парковка */
+.circle-start { flex-wrap: wrap; gap: 8px; }
+.circle-live { box-shadow: 0 0 0 2px var(--violet), var(--shadow); }
+.circle-live .timer { font-size: 1.4rem; }
+.circle-name { font-size: 1.2rem; }
+.circle-me { box-shadow: 0 0 0 3px var(--mint), var(--shadow); }
+.screen-circle { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 18px; margin-bottom: 12px; border-radius: var(--radius); background: var(--violet-soft); text-align: center; }
+.parking { box-shadow: 0 0 0 2px var(--warn), var(--shadow); }
+.park-row { display: flex; flex-direction: column; gap: 6px; padding: 8px 10px; border-radius: var(--radius-sm); background: var(--surface-2); }
+.icon-btn .badge { display: inline-grid; place-items: center; min-width: 16px; height: 16px; margin-left: 2px; padding: 0 4px; border-radius: 999px; background: var(--warn); color: #fff; font-size: 10px; font-weight: 800; }

@@ -18,6 +18,7 @@ import {TIMINGS, carryOver} from './timing'
 import {autoAssign, makeBranches, smallestBranch, type Branch} from './branches'
 import {ballotError, countVote, type Ballot, type Rule, type Vote, type VoteOutcome} from './decision'
 import type {CheckMark, CheckStatus} from './completeness'
+import {PARK_LIMIT, advance, circleOrder, currentSpeaker, type Circle, type ParkItem, type ParkTarget} from './circle'
 
 export const uid = (n = 10) => {
   const a = new Uint8Array(n)
@@ -37,6 +38,7 @@ export function createStage(opts: {
   sourceProblem?: string; sourceFields?: Record<string, FieldValue>; refOptions?: {id: string; title: string}[]
   passport?: Passport; assumptions?: Assumption[]; experiments?: Experiment[]
   seedCards?: Record<string, FieldValue>[]; seedCriteria?: Criterion[]; persona?: string; tasks?: Task[]; now: number
+  parking?: string[] // мысли, отложенные на прошлом этапе «в следующий этап»
   branches?: {title: string; source?: string; sourceFields?: Record<string, FieldValue>}[]
 }): Stage {
   const settings = {...DEFAULT_SETTINGS, ...opts.settings}
@@ -60,7 +62,8 @@ export function createStage(opts: {
     criteria: (opts.seedCriteria ?? []).map(c => ({...structuredClone(c), approved: true})), calibration: [], approvals: [], finalists: [], ratings: [], bases: [],
     submitted: {}, args: [], decisions: [], mergeSuggestions: [], calibRevealed: false,
     disputedForRound2: [], round2Done: false, version: 1, createdAt: opts.now,
-    ...(opts.branches?.length === 2 ? {branches: makeBranches(opts.branches), branchOf: {}} : {})
+    ...(opts.branches?.length === 2 ? {branches: makeBranches(opts.branches), branchOf: {}} : {}),
+    ...(opts.parking?.length ? {parking: opts.parking.slice(0, PARK_LIMIT).map((text, i) => ({id: `from${i}`, text, at: opts.now}))} : {})
   }
 }
 
@@ -151,6 +154,13 @@ export type Action =
   | {type: 'vote.cancel'}
   | {type: 'check.set'; key: string; status: CheckStatus | null; text?: string}
   | {type: 'revisit.set'; text: string}
+  | {type: 'circle.start'; seconds: number}
+  | {type: 'circle.next'}
+  | {type: 'circle.stop'}
+  | {type: 'circle.pass'}
+  | {type: 'circle.note'; text: string}
+  | {type: 'park.add'; id: string; text: string}
+  | {type: 'park.resolve'; id: string; to: ParkTarget | null}
   | {type: 'branch.join'; branchId: string}
   | {type: 'branch.assign'; pid: string; branchId: string}
   | {type: 'merge.suggest'; a: string; b: string}
@@ -198,7 +208,7 @@ export type Action =
 
 export const HOST_ONLY = new Set<Action['type']>([
   'phase.next', 'phase.back', 'deadline.extend', 'session.hostScreen',
-  'card.edit', 'card.restore', 'card.pin', 'card.duplicate', 'card.carry', 'card.return', 'branch.assign', 'vote.start', 'vote.reveal', 'vote.cancel', 'check.set', 'revisit.set', 'merge', 'unmerge', 'suggestion.dismiss', 'criterion.addLibrary',
+  'card.edit', 'card.restore', 'card.pin', 'card.duplicate', 'card.carry', 'card.return', 'branch.assign', 'vote.start', 'vote.reveal', 'vote.cancel', 'check.set', 'revisit.set', 'circle.start', 'circle.next', 'circle.stop', 'park.resolve', 'merge', 'unmerge', 'suggestion.dismiss', 'criterion.addLibrary',
   'criterion.update', 'criterion.remove', 'criterion.addCustom', 'settings.update', 'participant.setActive',
   'participant.add', 'participant.rename', 'calib.reveal', 'round2.start', 'decision.set',
   'passport.update', 'compliance.set', 'criterion.addFromPassport', 'round.open', 'round.reveal', 'round.close',
@@ -246,6 +256,8 @@ function enterPhase(s: Stage, phase: Phase, now: number, carry = false) {
   s.deadline = deadlineFor(s.settings, phase, now)
   s.carried = s.deadline && extra ? extra : undefined
   if (s.deadline && extra) s.deadline += extra
+  // Круг относится к обсуждению конкретного шага
+  if (s.circle?.open) s.circle = {...s.circle, open: false}
   // Ушли с шага «Решение» — незавершённое голосование закрываем
   if (phase !== 'decide' && s.vote?.open) s.vote.open = false
   // Генерация по веткам: кто не выбрал — раскладываем поровну
@@ -268,6 +280,8 @@ function enterPhase(s: Stage, phase: Phase, now: number, carry = false) {
   }
   if (phase === 'rate' && s.finalists.length === 0) s.finalists = realCards(s).map(c => c.id)
 }
+
+const CIRCLE_PHASES: Phase[] = ['merge', 'criteria', 'results', 'decide', 'board', 'summary']
 
 const EDIT_PHASES: Phase[] = ['merge', 'criteria', 'calibrate', 'shortlist']
 const PIN_PHASES: Phase[] = ['merge', 'criteria', 'calibrate', 'shortlist']
@@ -643,6 +657,64 @@ export function reduce(stage: Stage, action: Action, actor: string, isHost: bool
       if (!['decide', 'board', 'summary'].includes(s.phase)) fail('Условие пересмотра записывают после выбора')
       s.revisit = action.text.trim().slice(0, 300) || undefined
       break
+
+    case 'circle.start': {
+      if (!CIRCLE_PHASES.includes(s.phase)) fail('Круг — для обсуждения: на склейке, критериях, результатах или решении')
+      const ids = activeParticipants(s).map(p => p.id)
+      if (ids.length < 2) fail('Для круга нужно хотя бы двое')
+      const seconds = Math.min(300, Math.max(20, Math.round(action.seconds) || 90))
+      s.circle = {order: circleOrder(ids, now), idx: 0, seconds, turnStartedAt: now, open: true, skipped: [], notes: []}
+      break
+    }
+
+    case 'circle.next':
+      if (!s.circle?.open) fail('Круг не идёт')
+      s.circle = advance(s.circle!, now)
+      break
+
+    case 'circle.stop':
+      if (s.circle) s.circle = {...s.circle, open: false}
+      break
+
+    case 'circle.pass':
+    case 'circle.note': {
+      const c = s.circle
+      if (!c?.open) fail('Круг не идёт')
+      // Пропустить или написать может сам говорящий; ведущий — за любого (на одном экране)
+      if (currentSpeaker(c) !== actor && !isHost) fail('Сейчас не ваша очередь')
+      const who = currentSpeaker(c)!
+      let next: Circle = {...c!}
+      if (action.type === 'circle.note') {
+        const text = action.text.trim().slice(0, 400)
+        if (!text) fail('Напишите мысль')
+        next.notes = [...next.notes, text]
+      } else next.skipped = [...next.skipped, who]
+      s.circle = advance(next, now)
+      break
+    }
+
+    case 'park.add': {
+      if (!me && !isHost) fail('Сначала войдите в комнату')
+      const text = action.text.trim().slice(0, 300)
+      if (!text) fail('Напишите мысль')
+      const list = s.parking ?? []
+      if (list.length >= PARK_LIMIT) fail('Парковка переполнена — разберите её')
+      if (list.some(p => p.id === action.id)) break
+      s.parking = [...list, {id: action.id.slice(0, 20), text, at: now}]
+      break
+    }
+
+    case 'park.resolve': {
+      const item = (s.parking ?? []).find(p => p.id === action.id) ?? fail('Мысль не найдена')
+      if (action.to === 'task' && item.to !== 'task') {
+        s.tasks = [...(s.tasks ?? []), {id: `pk${item.id}`.slice(0, 20), title: item.text.slice(0, 200), done: false, source: 'manual', authorId: actor, createdAt: now}]
+      }
+      if (action.to === 'assumption' && item.to !== 'assumption') {
+        s.assumptions = [...(s.assumptions ?? []), {id: `pk${item.id}`.slice(0, 20), text: item.text, category: 'desirability', status: 'untested', authorId: actor, createdAt: now}]
+      }
+      s.parking = s.parking!.map(p => (p.id === item.id ? {...p, to: action.to ?? undefined} : p))
+      break
+    }
 
     case 'vote.cancel':
       s.vote = undefined
@@ -1143,6 +1215,8 @@ export interface PublicView {
   vote?: PublicVote
   checks: Record<string, CheckMark>
   revisit?: string
+  circle?: Circle
+  parking: ParkItem[]
   branches?: Branch[]
   branchOf: Record<string, string>
   disputedForRound2: string[]
@@ -1226,7 +1300,7 @@ export function publicView(s: Stage, now: number): PublicView {
     mergeSuggestions: s.mergeSuggestions.map(({a, b}) => ({a, b})),
     pinned: hideCards ? [] : s.pinned ?? [], carry: hideCards ? [] : s.carry ?? [],
     returned: s.phase === 'merge' ? s.returned ?? {} : {},
-    checks: s.checks ?? {}, revisit: s.revisit,
+    checks: s.checks ?? {}, revisit: s.revisit, circle: s.circle, parking: s.parking ?? [],
     vote: s.vote && {
       rule: s.vote.rule, candidates: s.vote.candidates, candidateId: s.vote.candidateId, ownerId: s.vote.ownerId,
       open: s.vote.open, voted: Object.keys(s.vote.ballots), outcome: s.vote.outcome

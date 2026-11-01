@@ -34,6 +34,7 @@ import {HotkeyHelp, useHotkeys} from './hotkeys'
 import {FeedbackCard, feedbackMarkdown, type ServiceFeedback} from './feedback'
 import {VoteBallot, VoteHost} from './vote'
 import {CompletenessCard} from './completeness'
+import {CIRCLE_PHASES, CircleHost, ParkButton, ParkingCard} from './circle'
 import {openItems} from '../core/completeness'
 import {openScreen, screenSupported, useScreenFeed} from './screen'
 
@@ -215,8 +216,10 @@ async function launchStage(p: StoredProject | undefined, base: {
     hostPid: uid(), hostName: base.hostName.trim(), mode: base.mode, workflow: base.workflow ? structuredClone(base.workflow) : undefined,
     passport: base.passport && passportFilled(base.passport) ? base.passport : undefined
   }
+  // Мысли из парковки, отложенные «в следующий этап», переходят сами
+  const parked = (p?.stages.at(-1)?.parking ?? []).filter(x => x.to === 'next').map(x => x.text)
   const s = createStage({
-    ...opts, projectId: project.id, now, passport: project.passport,
+    ...opts, projectId: project.id, now, passport: project.passport, parking: parked,
     assumptions: project.assumptions, experiments: project.experiments, tasks: project.tasks
   })
   let next = withStage({...project, title: base.title.trim(), hostName: base.hostName.trim(), mode: base.mode}, s)
@@ -773,6 +776,7 @@ function StageUI({project, session, transport, joinUrl, onExit, onNextStage, onB
           </div>
           <span class="spacer" />
           <PassportButton p={view.passport} onEdit={() => setEditPassport(true)} />
+          <ParkButton view={view} send={asParticipant(hostPid)} />
           {view.deadline && (
             <span class="row" style={{gap: 4}}>
               <Timer deadline={view.deadline} />
@@ -869,6 +873,10 @@ function StageUI({project, session, transport, joinUrl, onExit, onNextStage, onB
           <FeedbackCard stageTitle={stage.title} onSkip={() => onFeedback(null)}
             onSave={f => { onFeedback({...f, at: Date.now(), stageId: stage.id, stageTitle: stage.title}); toast('Спасибо! Отзыв сохранён в проекте') }} />
         )}
+        {tab === 'panel' && !projector && CIRCLE_PHASES.includes(view.phase) && view.participants.filter(p => p.active).length >= 2 && (
+          <CircleHost view={view} host={host} />
+        )}
+        {tab === 'panel' && !projector && WHAT_NEXT_PHASES.includes(view.phase) && <ParkingCard view={view} host={host} />}
         <div class="phase-enter" key={`${view.phase}-${tab}`}>
           {tab === 'panel' && (single
             ? <SingleScreen view={view} stage={stage} host={host} asParticipant={asParticipant} project={project} onNextStage={onNextStage} />

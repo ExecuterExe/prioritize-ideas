@@ -15,6 +15,7 @@ import {AssumptionsPanel} from './assumptions'
 import {TasksPanel} from './tasks'
 import {createPortal} from 'preact/compat'
 import {toast} from './toast'
+import {CircleBanner, ParkButton} from './circle'
 
 // Строка состояния: сохранено ли всё и дошло ли до ведущего
 function SyncStatus({pending, offline}: {pending: number; offline: boolean}) {
@@ -109,6 +110,7 @@ export function JoinApp({roomId, secret}: {roomId: string; secret: string}) {
             <div class="phase-title">{view ? phaseName(view) : 'Ищем организатора…'}</div>
           </div>
           {view && <PassportButton p={view.passport} />}
+          {view && session && <ParkButton view={view} send={a => session.send(a)} />}
           {view && tools?.tasks && <button class="ghost icon-btn small" title="Кто что делает" aria-label="Задачи" onClick={() => setTasksOpen(true)}>✅</button>}
           {view && tools?.assume && <button class="ghost icon-btn small" title="Предположения" aria-label="Предположения" onClick={() => setAssumeOpen(true)}>🎯</button>}
           {view && <Timer deadline={view.deadline} offset={session!.offset} />}
@@ -153,6 +155,7 @@ export function JoinApp({roomId, secret}: {roomId: string; secret: string}) {
             <div class="muted">Связь подвела, поэтому команда продолжает на ноутбуке организатора по очереди. Подойдите, когда позовут. Ваши черновики сохранены — когда телефоны вернут, экран оживёт сам.</div>
           </div>
         )}
+        {view && session && !view.hostScreen && <CircleBanner view={view} pid={pid} send={a => session.send(a)} offset={session.offset} />}
         {view && session && !view.hostScreen && <ParticipantStage view={view} pid={pid} send={a => session.send(a)} storeKey={`pi:me:${view.stageId}:${pid}`} assignKey={hashKey(token)} late={session.lastLate.value} />}
       </div>
     </div>

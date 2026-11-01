@@ -6,6 +6,7 @@ import type {PublicView} from '../core/engine'
 import {cardTitle} from '../core/template'
 import {Avatars, PhaseSteps, QR, Ring, Timer, phaseName, stepLabel} from './common'
 import {ResultsView} from './results'
+import {CircleScreen} from './circle'
 
 const CHANNEL = 'pi-screen'
 
@@ -74,6 +75,7 @@ export function ScreenApp() {
       </header>
       <PhaseSteps view={view} />
       <main class="screen-body">
+        <CircleScreen view={view} />
         <ScreenBody view={view} joinUrl={joinUrl} />
       </main>
     </div>
