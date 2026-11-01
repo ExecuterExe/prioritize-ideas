@@ -177,6 +177,7 @@ export function buildMarkdown(view: PublicView, projectTitle: string, route: str
   L.push(`# ${projectTitle} — ${view.template.name}`, '')
   if (view.sourceProblem) L.push(`**Исходим из:** ${view.sourceProblem}`, '')
   if (route.length > 1) L.push('## Как мы пришли к решению', '', ...route.map((r, i) => `${i + 1}. ${r}`), '')
+  if (view.vote?.outcome) L.push(`**Как приняли решение:** ${view.vote.outcome.note}`, ...(view.vote.outcome.objections?.length ? ['', '**Возражения:**', ...view.vote.outcome.objections.map(o => `- ${o}`)] : []), '')
   const marked = (ids: string[]) => ids.map(id => view.cards.find(c => c.id === id)).filter(c => !!c).map(c => cardTitle(view.template, c!.fields)).join('; ')
   if (view.pinned.length) L.push(`**📌 Закреплено ведущим:** ${marked(view.pinned)}`, '')
   if (view.carry.length) L.push(`**↗ Берём в следующий этап:** ${marked(view.carry)}`, '')

@@ -2,6 +2,7 @@
 
 import type {FieldValue, StageTemplate} from './template'
 import type {Branch} from './branches'
+import type {Vote} from './decision'
 import type {ComplianceValue, Passport} from './passport'
 import type {Assumption, AssumptionRound, Experiment} from './assume'
 import type {ParentLink} from './evolve'
@@ -128,6 +129,7 @@ export interface Stage {
   branches?: Branch[] // развилка: две подгруппы с разными направлениями
   branchOf?: Record<string, string> // участник → ветка
   returned?: Record<string, string> // карточки, возвращённые автору на доработку: id → что уточнить
+  vote?: Vote // регламент решения: голосование на шаге «Решение»
   carry?: string[] // отмечены «взять в следующий этап»
   carried?: number // мс, перенесённые с прошлого шага (закончили раньше)
   hostScreen?: boolean // Wi-Fi подвёл: сессия идёт на ноутбуке ведущего

@@ -16,6 +16,7 @@ import {approvalQuota, calibrationSpread, computeResults, pickFinalists, type Re
 import {criterionReady} from './lint'
 import {TIMINGS, carryOver} from './timing'
 import {autoAssign, makeBranches, smallestBranch, type Branch} from './branches'
+import {ballotError, countVote, type Ballot, type Rule, type Vote, type VoteOutcome} from './decision'
 
 export const uid = (n = 10) => {
   const a = new Uint8Array(n)
@@ -143,6 +144,10 @@ export type Action =
   | {type: 'card.duplicate'; id: string; newId: string}
   | {type: 'card.carry'; id: string; on: boolean}
   | {type: 'card.return'; id: string; note: string | null}
+  | {type: 'vote.start'; rule: Exclude<Rule, 'score'>; candidateId?: string; ownerId?: string}
+  | {type: 'vote.cast'; ballot: Ballot}
+  | {type: 'vote.reveal'}
+  | {type: 'vote.cancel'}
   | {type: 'branch.join'; branchId: string}
   | {type: 'branch.assign'; pid: string; branchId: string}
   | {type: 'merge.suggest'; a: string; b: string}
@@ -190,7 +195,7 @@ export type Action =
 
 export const HOST_ONLY = new Set<Action['type']>([
   'phase.next', 'phase.back', 'deadline.extend', 'session.hostScreen',
-  'card.edit', 'card.restore', 'card.pin', 'card.duplicate', 'card.carry', 'card.return', 'branch.assign', 'merge', 'unmerge', 'suggestion.dismiss', 'criterion.addLibrary',
+  'card.edit', 'card.restore', 'card.pin', 'card.duplicate', 'card.carry', 'card.return', 'branch.assign', 'vote.start', 'vote.reveal', 'vote.cancel', 'merge', 'unmerge', 'suggestion.dismiss', 'criterion.addLibrary',
   'criterion.update', 'criterion.remove', 'criterion.addCustom', 'settings.update', 'participant.setActive',
   'participant.add', 'participant.rename', 'calib.reveal', 'round2.start', 'decision.set',
   'passport.update', 'compliance.set', 'criterion.addFromPassport', 'round.open', 'round.reveal', 'round.close',
@@ -238,6 +243,8 @@ function enterPhase(s: Stage, phase: Phase, now: number, carry = false) {
   s.deadline = deadlineFor(s.settings, phase, now)
   s.carried = s.deadline && extra ? extra : undefined
   if (s.deadline && extra) s.deadline += extra
+  // Ушли с шага «Решение» — незавершённое голосование закрываем
+  if (phase !== 'decide' && s.vote?.open) s.vote.open = false
   // Генерация по веткам: кто не выбрал — раскладываем поровну
   if (phase === 'generate' && s.branches) s.branchOf = autoAssign(s.branches, s.branchOf ?? {}, activeParticipants(s).map(p => p.id))
   if (phase === 'criteria' && s.criteria.length === 0) {
@@ -584,6 +591,46 @@ export function reduce(stage: Stage, action: Action, actor: string, isHost: bool
       s.branchOf = {...s.branchOf, [pid]: action.branchId}
       break
     }
+
+    case 'vote.start': {
+      if (s.phase !== 'decide') fail('Голосование — на шаге «Решение»')
+      const candidates = s.finalists.filter(id => s.cards.some(c => c.id === id))
+      if (candidates.length < 1) fail('Нет вариантов для голосования')
+      if ((action.rule === 'consent' || action.rule === 'consensus') && !candidates.includes(action.candidateId ?? '')) fail('Выберите, какой вариант выносим на согласие')
+      if (action.rule === 'owner' && !activeParticipants(s).some(p => p.id === action.ownerId)) fail('Выберите ответственного')
+      if ((action.rule === 'majority' || action.rule === 'ranking') && candidates.length < 2) fail('Для голосования нужно хотя бы два варианта')
+      const onCandidate = action.rule === 'consent' || action.rule === 'consensus'
+      s.vote = {rule: action.rule, candidates, candidateId: onCandidate ? action.candidateId : undefined, ownerId: action.rule === 'owner' ? action.ownerId : undefined, open: true, ballots: {}}
+      break
+    }
+
+    case 'vote.cast': {
+      const v = s.vote
+      if (!v?.open) fail('Голосование закрыто')
+      if (!me) fail('Сначала войдите в комнату')
+      if (v!.rule === 'owner' && actor !== v!.ownerId) fail('Решает назначенный ответственный')
+      const err = ballotError(v!, action.ballot)
+      if (err) fail(err)
+      const b = action.ballot
+      v!.ballots[actor] = b.kind === 'stance' ? {kind: 'stance', stance: b.stance, reason: b.reason?.trim().slice(0, 300) || undefined} : structuredClone(b)
+      break
+    }
+
+    case 'vote.reveal': {
+      const v = s.vote ?? fail('Голосования нет')
+      if (!Object.keys(v.ballots).length) fail('Пока никто не проголосовал')
+      v.open = false
+      v.outcome = countVote(v, id => cardLabel(s, id))
+      // Принятый вариант сразу отмечаем выбранным — ведущий может поправить
+      if (v.outcome.winnerId) {
+        s.decisions = [...s.decisions.filter(d => d.cardId !== v.outcome!.winnerId), {cardId: v.outcome.winnerId, status: 'chosen', reason: v.outcome.note.slice(0, 300)}]
+      }
+      break
+    }
+
+    case 'vote.cancel':
+      s.vote = undefined
+      break
 
     case 'card.return': {
       if (s.phase !== 'merge') fail('Вернуть на доработку можно на шаге склейки')
@@ -1022,6 +1069,17 @@ export interface PublicCard {
   branchId?: string
 }
 
+// Голосование наружу: кто проголосовал — видно, как именно — нет; после раскрытия — только итог
+export interface PublicVote {
+  rule: Vote['rule']
+  candidates: string[]
+  candidateId?: string
+  ownerId?: string
+  open: boolean
+  voted: string[]
+  outcome?: VoteOutcome
+}
+
 export interface PublicView {
   stageId: string
   carried?: number // мс запаса, перенесённые с прошлого шага
@@ -1066,6 +1124,7 @@ export interface PublicView {
   pinned: string[]
   carry: string[]
   returned: Record<string, string>
+  vote?: PublicVote
   branches?: Branch[]
   branchOf: Record<string, string>
   disputedForRound2: string[]
@@ -1149,6 +1208,10 @@ export function publicView(s: Stage, now: number): PublicView {
     mergeSuggestions: s.mergeSuggestions.map(({a, b}) => ({a, b})),
     pinned: hideCards ? [] : s.pinned ?? [], carry: hideCards ? [] : s.carry ?? [],
     returned: s.phase === 'merge' ? s.returned ?? {} : {},
+    vote: s.vote && {
+      rule: s.vote.rule, candidates: s.vote.candidates, candidateId: s.vote.candidateId, ownerId: s.vote.ownerId,
+      open: s.vote.open, voted: Object.keys(s.vote.ballots), outcome: s.vote.outcome
+    },
     branches: s.branches, branchOf: s.branchOf ?? {},
     disputedForRound2: s.disputedForRound2,
     round2Done: s.round2Done,

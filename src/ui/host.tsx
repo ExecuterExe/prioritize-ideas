@@ -1,5 +1,6 @@
 // Приложение организатора: проекты, создание этапа, пульт, режим «Один экран».
 import {useEffect, useMemo, useRef, useState} from 'preact/hooks'
+import {createPortal} from 'preact/compat'
 import {createStage, participantKey, uid, type Action, type PublicView} from '../core/engine'
 import {libraryFor} from '../core/library'
 import {BUILTIN_TEMPLATES, BUILTIN_WORKFLOWS, asText, cardSubtitle, cardTitle, isEmpty, type Workflow} from '../core/template'
@@ -31,6 +32,7 @@ import {CardMarks, CardMenu, EditCardSheet, HistorySheet} from './cardmenu'
 import {BranchBoard} from './branches'
 import {HotkeyHelp, useHotkeys} from './hotkeys'
 import {FeedbackCard, feedbackMarkdown, type ServiceFeedback} from './feedback'
+import {VoteBallot, VoteHost} from './vote'
 import {openScreen, screenSupported, useScreenFeed} from './screen'
 
 declare const __SINGLE__: boolean
@@ -908,9 +910,10 @@ function Progress({view, stage}: {view: PublicView; stage: Stage}) {
   )
 }
 
-function HostPanel({view, stage, host, joinUrl, project, projector, onNextStage}: {
+function HostPanel({view, stage, host, joinUrl, project, projector, onNextStage, asParticipant}: {
   view: PublicView; stage: Stage; host: (a: Action) => string | null; joinUrl: string; project: StoredProject; projector: boolean
   onNextStage: (p: StoredProject, fromStageId: string) => void
+  asParticipant?: (pid: string) => (a: Action) => Promise<string | null> // один экран: голосование за ноутбуком
 }) {
   const journey = view.template.mode === 'journey'
   if (journey && view.phase === 'summary') {
@@ -1000,7 +1003,7 @@ function HostPanel({view, stage, host, joinUrl, project, projector, onNextStage}
     case 'board':
       return <BoardPanel view={view} host={host} />
     case 'decide':
-      return <DecidePanel view={view} host={host} />
+      return <DecidePanel view={view} host={host} asParticipant={asParticipant} />
     case 'summary':
       return <SummaryView view={view} projectTitle={project.title} route={routeChain(project.stages, project.path)} extra={
         <div class="row no-print">
@@ -1218,9 +1221,12 @@ function ResultsPanel({view, host, pid}: {view: PublicView; host: (a: Action) =>
   )
 }
 
-function DecidePanel({view, host}: {view: PublicView; host: (a: Action) => string | null}) {
+function DecidePanel({view, host, asParticipant}: {view: PublicView; host: (a: Action) => string | null; asParticipant?: (pid: string) => (a: Action) => Promise<string | null>}) {
   const res = view.results
   const [reasons, setReasons] = useState<Record<string, string>>({})
+  // Один экран: кто сейчас голосует за ноутбуком (со «шторкой»)
+  const [voter, setVoter] = useState<{pid: string; shown: boolean} | null>(null)
+  const voters = view.participants.filter(p => p.active)
   if (!res) return null
   const leader = res.cards[0]?.cardId
   // В pre-mortem вместо «выбрать» — что делаем с риском
@@ -1233,7 +1239,29 @@ function DecidePanel({view, host}: {view: PublicView; host: (a: Action) => strin
     <div class="stack">
       {isRisk
         ? <PhaseIntro emoji="🧯" title="Что делаем с рисками">Для опасных — мера: как не допустить. Остальные — следим или считаем неважными.</PhaseIntro>
-        : <PhaseIntro emoji="🤝" title="Принимаем решение">Отметьте выбранное. Отложенному — причину, чтобы вернуться позже.</PhaseIntro>}
+        : <PhaseIntro emoji="🤝" title="Принимаем решение">Выберите, как договариваемся, — или отметьте выбранное сами. Отложенному — причину, чтобы вернуться позже.</PhaseIntro>}
+      {!isRisk && <VoteHost view={view} host={host} voters={voters} onSingleVote={asParticipant ? pid => setVoter({pid, shown: false}) : undefined} />}
+      {voter && asParticipant && createPortal(
+        <div class="sheet-backdrop">
+          <div class="sheet" role="dialog" aria-label="Голосование">
+            {!voter.shown
+              ? (
+                <div class="curtain stack center">
+                  <h2>Передайте ноутбук: {voters.find(p => p.id === voter.pid)?.name}</h2>
+                  <button class="primary" onClick={() => setVoter({...voter, shown: true})}>Я {voters.find(p => p.id === voter.pid)?.name}, голосую</button>
+                  <button class="ghost" onClick={() => setVoter(null)}>Отмена</button>
+                </div>
+              )
+              : (
+                <div class="stack">
+                  <VoteBallot view={view} pid={voter.pid} send={async a => { const r = await asParticipant(voter.pid)(a); if (!r) setVoter(null); return r }} />
+                  <button class="ghost" onClick={() => setVoter(null)}>Закрыть</button>
+                </div>
+              )}
+          </div>
+        </div>,
+        document.body
+      )}
       {res.cards.map(r => {
         const card = view.cards.find(c => c.id === r.cardId)
         if (!card) return null
@@ -1353,7 +1381,7 @@ function SingleScreen({view, stage, host, asParticipant, project, onNextStage}: 
   }
 
   if (!blind) {
-    return <HostPanel view={view} stage={stage} host={host} joinUrl="" project={project} projector={false} onNextStage={onNextStage} />
+    return <HostPanel view={view} stage={stage} host={host} joinUrl="" project={project} projector={false} onNextStage={onNextStage} asParticipant={asParticipant} />
   }
 
   // Слепые шаги: участники по очереди, с «шторкой» между ними
