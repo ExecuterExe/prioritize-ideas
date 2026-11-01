@@ -258,6 +258,9 @@ function MergeView({view, send, isMine}: {view: PublicView; send: Send; isMine: 
     <div class="stack">
       <PhaseIntro emoji="🧩" title="Все карточки команды">Видите две об одном и том же? Нажмите «Похожа» на обеих — организатор склеит.</PhaseIntro>
       {msg && <div class="error">{msg}</div>}
+      {view.cards.filter(c => isMine(c) && view.returned[c.id] !== undefined).map(c => (
+        <ReworkCard key={`rw-${c.id}`} view={view} card={c} send={send} />
+      ))}
       {view.cards.map(c => (
         <div class="card" key={c.id} style={pick === c.id ? {outline: '2px solid var(--accent)'} : undefined}>
           <div class="row between" style={{alignItems: 'flex-start'}}>
@@ -271,6 +274,32 @@ function MergeView({view, send, isMine}: {view: PublicView; send: Send; isMine: 
           </div>
         </div>
       ))}
+    </div>
+  )
+}
+
+// Ведущий вернул вашу карточку на доработку — поправьте и отправьте
+function ReworkCard({view, card, send}: {view: PublicView; card: PublicCard; send: Send}) {
+  const [values, setValues] = useState<Record<string, FieldValue>>(() => structuredClone(card.fields))
+  const [err, setErr] = useState<string | null>(null)
+  const [busy, setBusy] = useState(false)
+  const note = view.returned[card.id]
+  const save = async () => {
+    const {errors, values: clean} = validateCard(view.template, values)
+    if (errors.length) { setErr(errors[0]); return }
+    setBusy(true)
+    const r = await send({type: 'card.upsert', id: card.id, fields: clean})
+    setBusy(false)
+    setErr(r)
+    if (!r) toast('Карточка уточнена — спасибо!')
+  }
+  return (
+    <div class="card stack rework">
+      <b>↩ Ведущий просит уточнить вашу карточку</b>
+      {note && <div class="note">{note}</div>}
+      <CardForm tpl={view.template} values={values} refOptions={view.refOptions} onChange={(k, v) => setValues(prev => ({...prev, [k]: v}))} />
+      <ErrorLine msg={err} />
+      <div><button class="primary" disabled={busy} onClick={save}>{busy ? 'Отправляем…' : 'Отправить уточнение'}</button></div>
     </div>
   )
 }

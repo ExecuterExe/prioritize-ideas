@@ -127,6 +127,7 @@ export interface Stage {
   pinned?: string[] // закреплённые карточки: наверху и точно идут в оценку
   branches?: Branch[] // развилка: две подгруппы с разными направлениями
   branchOf?: Record<string, string> // участник → ветка
+  returned?: Record<string, string> // карточки, возвращённые автору на доработку: id → что уточнить
   carry?: string[] // отмечены «взять в следующий этап»
   carried?: number // мс, перенесённые с прошлого шага (закончили раньше)
   hostScreen?: boolean // Wi-Fi подвёл: сессия идёт на ноутбуке ведущего

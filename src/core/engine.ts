@@ -142,6 +142,7 @@ export type Action =
   | {type: 'card.pin'; id: string; on: boolean}
   | {type: 'card.duplicate'; id: string; newId: string}
   | {type: 'card.carry'; id: string; on: boolean}
+  | {type: 'card.return'; id: string; note: string | null}
   | {type: 'branch.join'; branchId: string}
   | {type: 'branch.assign'; pid: string; branchId: string}
   | {type: 'merge.suggest'; a: string; b: string}
@@ -189,7 +190,7 @@ export type Action =
 
 export const HOST_ONLY = new Set<Action['type']>([
   'phase.next', 'phase.back', 'deadline.extend', 'session.hostScreen',
-  'card.edit', 'card.restore', 'card.pin', 'card.duplicate', 'card.carry', 'branch.assign', 'merge', 'unmerge', 'suggestion.dismiss', 'criterion.addLibrary',
+  'card.edit', 'card.restore', 'card.pin', 'card.duplicate', 'card.carry', 'card.return', 'branch.assign', 'merge', 'unmerge', 'suggestion.dismiss', 'criterion.addLibrary',
   'criterion.update', 'criterion.remove', 'criterion.addCustom', 'settings.update', 'participant.setActive',
   'participant.add', 'participant.rename', 'calib.reveal', 'round2.start', 'decision.set',
   'passport.update', 'compliance.set', 'criterion.addFromPassport', 'round.open', 'round.reveal', 'round.close',
@@ -301,13 +302,20 @@ export function reduce(stage: Stage, action: Action, actor: string, isHost: bool
       const existing = s.cards.find(c => c.id === action.id)
       // На шаге «Развитие» можно править только свои новые версии
       const evolveEdit = s.phase === 'evolve' && !!existing?.parents?.length
-      if (s.phase !== 'generate' && s.phase !== 'lobby' && !evolveEdit) fail('Добавлять карточки можно только на шаге генерации')
+      // Ведущий вернул карточку на доработку — автор может поправить её на склейке
+      const returnedEdit = s.phase === 'merge' && !!existing && s.returned?.[existing.id] !== undefined
+      if (s.phase !== 'generate' && s.phase !== 'lobby' && !evolveEdit && !returnedEdit) fail('Добавлять карточки можно только на шаге генерации')
       const {values: fields, errors} = validateCard(s.template, action.fields ?? {})
       if (errors.length) fail(errors[0])
       if (existing) {
         if (!existing.authorIds.includes(actor)) fail('Это не ваша карточка')
+        if (returnedEdit) {
+          if (JSON.stringify(existing.fields) !== JSON.stringify(fields)) existing.history = [...(existing.history ?? []), {fields: existing.fields, at: now}].slice(-HISTORY_LIMIT)
+          const {[existing.id]: _done, ...rest} = s.returned!
+          s.returned = rest
+        }
         existing.fields = fields
-        existing.basis = action.basis
+        existing.basis = returnedEdit ? action.basis ?? existing.basis : action.basis
       } else {
         const mine = s.cards.filter(c => c.authorIds.includes(actor) && !c.parents?.length).length
         const limit = s.journey ? BARRIER_LIMIT : s.settings.cardLimit
@@ -574,6 +582,15 @@ export function reduce(stage: Stage, action: Action, actor: string, isHost: bool
       if (!s.participants.some(p => p.id === pid)) fail('Сначала войдите в комнату')
       // Уже написанные карточки остаются в своей ветке
       s.branchOf = {...s.branchOf, [pid]: action.branchId}
+      break
+    }
+
+    case 'card.return': {
+      if (s.phase !== 'merge') fail('Вернуть на доработку можно на шаге склейки')
+      const c = s.cards.find(x => x.id === action.id) ?? fail('Карточка не найдена')
+      if (!c.authorIds.length) fail('У этой карточки нет автора — уточните её сами')
+      const {[c.id]: _old, ...rest} = s.returned ?? {}
+      s.returned = action.note === null ? rest : {...rest, [c.id]: action.note.trim().slice(0, 200)}
       break
     }
 
@@ -1048,6 +1065,7 @@ export interface PublicView {
   mergeSuggestions: {a: string; b: string}[]
   pinned: string[]
   carry: string[]
+  returned: Record<string, string>
   branches?: Branch[]
   branchOf: Record<string, string>
   disputedForRound2: string[]
@@ -1130,6 +1148,7 @@ export function publicView(s: Stage, now: number): PublicView {
     decisions: s.decisions,
     mergeSuggestions: s.mergeSuggestions.map(({a, b}) => ({a, b})),
     pinned: hideCards ? [] : s.pinned ?? [], carry: hideCards ? [] : s.carry ?? [],
+    returned: s.phase === 'merge' ? s.returned ?? {} : {},
     branches: s.branches, branchOf: s.branchOf ?? {},
     disputedForRound2: s.disputedForRound2,
     round2Done: s.round2Done,

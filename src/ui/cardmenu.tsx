@@ -16,9 +16,11 @@ export function CardMarks({view, card, onHistory}: {view: PublicView; card: Publ
   const carry = view.carry.includes(card.id)
   const edits = card.history?.length ?? 0
   const branch = view.branches?.find(b => b.id === card.branchId)
-  if (!pinned && !carry && !edits && !branch) return null
+  const returned = card.id in view.returned
+  if (!pinned && !carry && !edits && !branch && !returned) return null
   return (
     <div class="row" style={{gap: 4}}>
+      {returned && <span class="chip warn" title={view.returned[card.id] || 'Ждём уточнения от автора'}>↩ на доработке у автора</span>}
       {branch && <span class="chip" title={branch.title}><span class="branch-tag">{branch.id}</span> {branch.title.slice(0, 24)}</span>}
       {pinned && <span class="chip accent" title="Точно идёт в оценку">📌 закреплено</span>}
       {carry && <span class="chip ok" title="Можно взять исходной в следующем этапе">↗ в следующий этап</span>}
@@ -27,7 +29,7 @@ export function CardMarks({view, card, onHistory}: {view: PublicView; card: Publ
   )
 }
 
-export function CardMenu({view, card, host, onHistory, onEdit}: {view: PublicView; card: PublicCard; host: Host; onHistory: () => void; onEdit: () => void}) {
+export function CardMenu({view, card, host, onHistory, onEdit, canReturn}: {view: PublicView; card: PublicCard; host: Host; onHistory: () => void; onEdit: () => void; canReturn: boolean}) {
   const ref = useRef<HTMLDetailsElement>(null)
   const close = () => ref.current?.removeAttribute('open')
   const pinned = view.pinned.includes(card.id)
@@ -40,6 +42,14 @@ export function CardMenu({view, card, host, onHistory, onEdit}: {view: PublicVie
         <button class="ghost small" onClick={() => { close(); onEdit() }}>✏️ Уточнить формулировку</button>
         {(card.history?.length ?? 0) > 0 && <button class="ghost small" onClick={() => { close(); onHistory() }}>🕘 История ({card.history!.length})</button>}
         <button class="ghost small" onClick={() => run({type: 'card.pin', id: card.id, on: !pinned}, pinned ? 'Откреплено' : 'Закреплено: точно пойдёт в оценку')}>{pinned ? '📌 Открепить' : '📌 Закрепить — точно в оценку'}</button>
+        {view.phase === 'merge' && canReturn && !(card.id in view.returned) && <button class="ghost small" onClick={() => {
+          close()
+          const note = prompt('Что уточнить автору? (необязательно)', '')
+          if (note === null) return
+          const r = host({type: 'card.return', id: card.id, note})
+          if (r) toast(r, 'error'); else toast('Карточка вернулась автору — он увидит просьбу на телефоне')
+        }}>↩ Вернуть автору на доработку</button>}
+        {view.phase === 'merge' && card.id in view.returned && <button class="ghost small" onClick={() => run({type: 'card.return', id: card.id, note: null}, 'Просьба отменена')}>↩ Отменить доработку</button>}
         {view.phase === 'merge' && <button class="ghost small" onClick={() => run({type: 'card.duplicate', id: card.id, newId: uid()}, 'Копия добавлена рядом — уточните её')}>⧉ Дублировать как вариант</button>}
         <button class="ghost small" onClick={() => run({type: 'card.carry', id: card.id, on: !carry}, carry ? 'Убрано из следующего этапа' : 'Можно будет взять исходной в следующем этапе')}>{carry ? '↗ Не брать в следующий этап' : '↗ Взять в следующий этап'}</button>
       </div>

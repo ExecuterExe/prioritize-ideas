@@ -29,6 +29,8 @@ import {WhatNextSheet} from './whatnext'
 import {Pulse, ReadyCheck, linkStatus} from './pulse'
 import {CardMarks, CardMenu, EditCardSheet, HistorySheet} from './cardmenu'
 import {BranchBoard} from './branches'
+import {HotkeyHelp, useHotkeys} from './hotkeys'
+import {FeedbackCard, feedbackMarkdown, type ServiceFeedback} from './feedback'
 import {openScreen, screenSupported, useScreenFeed} from './screen'
 
 declare const __SINGLE__: boolean
@@ -133,6 +135,9 @@ function Home({projects, onOpen, onNew, onNewStage, onChanged, onTemplates}: {
         <button class="primary" onClick={onNew}>Новый проект</button>
         <button onClick={() => fileRef.current?.click()}>Открыть файл проекта</button>
         <button class="ghost" onClick={onTemplates}>🧱 Шаблоны карточек</button>
+        {projects?.some(p => p.feedback?.length) && (
+          <button class="ghost" onClick={() => downloadFile('Отзывы о сервисе.md', feedbackMarkdown(projects))}>📝 Отзывы о сервисе ({projects.reduce((n, p) => n + (p.feedback?.length ?? 0), 0)})</button>
+        )}
         <input ref={fileRef} type="file" accept=".json,application/json" hidden onChange={e => { const f = (e.target as HTMLInputElement).files?.[0]; if (f) void importFile(f) }} />
       </div>
       <ErrorLine msg={err} />
@@ -657,14 +662,26 @@ function StageScreen({projectId, stageId, onExit, onNextStage, onOpenStage}: {
     onOpenStage(next, stage.id)
   }
 
-  return <StageUI project={project} session={session} transport={transport} joinUrl={joinUrl} onExit={onExit} onNextStage={onNextStage} onBranch={branch} />
+  // Отзыв о сервисе живёт в проекте и выгружается вместе с ним
+  const saveFeedback = (f: ServiceFeedback | null) => {
+    const cur = projectRef.current!
+    const sid = session.stage.value.id
+    projectRef.current = f
+      ? {...cur, feedback: [...(cur.feedback ?? []).filter(x => x.stageId !== sid), f]}
+      : {...cur, feedbackSkipped: [...(cur.feedbackSkipped ?? []), sid]}
+    void saveProject(projectRef.current)
+    setProject(projectRef.current)
+  }
+
+  return <StageUI project={project} session={session} transport={transport} joinUrl={joinUrl} onExit={onExit} onNextStage={onNextStage} onBranch={branch} onFeedback={saveFeedback} />
 }
 
 type Tab = 'panel' | 'me' | 'assume' | 'tasks' | 'diag'
 
-function StageUI({project, session, transport, joinUrl, onExit, onNextStage, onBranch}: {
+function StageUI({project, session, transport, joinUrl, onExit, onNextStage, onBranch, onFeedback}: {
   project: StoredProject; session: HostSession; transport: NostrTransport | null; joinUrl: string
   onExit: () => void; onNextStage: (p: StoredProject, fromStageId: string) => void; onBranch: (c: PathChoice, fork?: [string, string]) => Promise<void>
+  onFeedback: (f: ServiceFeedback | null) => void
 }) {
   const view = session.view.value
   const stage = session.stage.value
@@ -716,6 +733,19 @@ function StageUI({project, session, transport, joinUrl, onExit, onNextStage, onB
     }
     host({type: 'phase.next'})
   }
+
+  // Горячие клавиши; выключены, пока за ноутбуком участник (один экран, слепой шаг)
+  const [help, setHelp] = useState(false)
+  useHotkeys(!(single && BLIND_PHASES.has(view.phase)), {
+    next: () => { if (!view.advanceBlock && view.phase !== 'summary') next(); else if (view.advanceBlock) toast(view.advanceBlock, 'info') },
+    back: () => { if (view.canGoBack) host({type: 'phase.back'}) },
+    extend: () => { if (view.deadline) { host({type: 'deadline.extend', minutes: 2}); toast('+2 минуты', 'info') } },
+    reveal: () => { if (view.phase === 'rate' || view.phase === 'rate2') next() },
+    whatNext: () => { if (WHAT_NEXT_PHASES.includes(view.phase)) setWhatNext(true) },
+    screen: () => { if (screenSupported && !__SINGLE__) openScreen() },
+    myVote: () => { if (!single) setTab('me') },
+    help: () => setHelp(true)
+  })
 
   const openTasks = buildPlan(view).items.filter(i => !i.done).length
   // Быстрый режим: инструменты без данных убраны в «Ещё инструменты»
@@ -778,6 +808,7 @@ function StageUI({project, session, transport, joinUrl, onExit, onNextStage, onB
           }
         }}
         asHost={asParticipant(hostPid)} onExit={onExit} />}
+      {help && <HotkeyHelp onClose={() => setHelp(false)} />}
       {editPassport && <PassportEditSheet value={view.passport} onClose={() => setEditPassport(false)}
         onSave={pp => { if (!host({type: 'passport.update', passport: pp})) toast('Задание обновлено у всех') }} />}
       <div class="wrap stack">
@@ -804,6 +835,7 @@ function StageUI({project, session, transport, joinUrl, onExit, onNextStage, onB
               )}
               {screenSupported && !__SINGLE__ && <button class="ghost small" onClick={openScreen} title="Второе окно: перетащите его на проектор">🖥 Окно для проектора</button>}
               <button class="ghost small" onClick={() => setProjector(true)} title="Крупный шрифт на этом же экране">⛶ Большой экран</button>
+              <button class="ghost small icon-btn" onClick={() => setHelp(true)} title="Горячие клавиши (?)" aria-label="Горячие клавиши">⌨️</button>
             </span>
           </div>
         )}
@@ -824,6 +856,10 @@ function StageUI({project, session, transport, joinUrl, onExit, onNextStage, onB
         )}
         {tab === 'panel' && !projector && !['lobby', 'summary'].includes(view.phase) && view.template.mode !== 'journey' && (
           <Pulse view={view} stage={stage} host={host} hostPid={hostPid} seen={session.seen.value} network={network && !stage.hostScreen} onHostScreen={goHostScreen} />
+        )}
+        {tab === 'panel' && !projector && view.phase === 'summary' && !project.feedback?.some(f => f.stageId === stage.id) && !project.feedbackSkipped?.includes(stage.id) && (
+          <FeedbackCard stageTitle={stage.title} onSkip={() => onFeedback(null)}
+            onSave={f => { onFeedback({...f, at: Date.now(), stageId: stage.id, stageTitle: stage.title}); toast('Спасибо! Отзыв сохранён в проекте') }} />
         )}
         <div class="phase-enter" key={`${view.phase}-${tab}`}>
           {tab === 'panel' && (single
@@ -937,7 +973,7 @@ function HostPanel({view, stage, host, joinUrl, project, projector, onNextStage}
         </div>
       )
     case 'merge':
-      return <MergePanel view={view} host={host} />
+      return <MergePanel view={view} host={host} phones={!!joinUrl && !view.hostScreen} />
     case 'criteria':
       return <CriteriaPanel view={view} stage={stage} host={host} />
     case 'calibrate':
@@ -1011,7 +1047,7 @@ function Participants({stage, host, compact}: {stage: Stage; host: (a: Action) =
   )
 }
 
-function MergePanel({view, host}: {view: PublicView; host: (a: Action) => string | null}) {
+function MergePanel({view, host, phones}: {view: PublicView; host: (a: Action) => string | null; phones: boolean}) {
   const [drag, setDrag] = useState<string | null>(null)
   const [over, setOver] = useState<string | null>(null)
   const [pick, setPick] = useState<string | null>(null)
@@ -1045,7 +1081,7 @@ function MergePanel({view, host}: {view: PublicView; host: (a: Action) => string
             onDragOver={e => { e.preventDefault(); if (drag && drag !== c.id) setOver(c.id) }}
             onDragLeave={() => setOver(null)}
             onDrop={e => { e.preventDefault(); if (drag && drag !== c.id) merge(c.id, drag); setOver(null) }}>
-            <CardMenu view={view} card={c} host={host} onEdit={() => setEditing(c.id)} onHistory={() => setHistory(c.id)} />
+            <CardMenu view={view} card={c} host={host} canReturn={phones} onEdit={() => setEditing(c.id)} onHistory={() => setHistory(c.id)} />
             <CardBody tpl={view.template} refOptions={view.refOptions} card={c} full />
             <CardMarks view={view} card={c} onHistory={() => setHistory(c.id)} />
             <div class="row" style={{marginTop: 8}}>

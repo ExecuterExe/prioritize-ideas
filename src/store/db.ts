@@ -8,6 +8,7 @@ import type {Passport} from '../core/passport'
 import type {Assumption, Experiment} from '../core/assume'
 import type {Task} from '../core/tasks'
 import type {PathStep} from '../core/route'
+import type {ServiceFeedback} from '../ui/feedback'
 
 export interface RoomInfo {
   roomId: string
@@ -26,6 +27,9 @@ export interface StoredProject extends Project {
   tasks?: Task[]
   // Как этапы связаны между собой: «Что дальше?» → выбранный путь
   path?: PathStep[]
+  // Отзывы ведущего о работе сервиса (не об идеях)
+  feedback?: ServiceFeedback[]
+  feedbackSkipped?: string[] // этапы, где ведущий нажал «Не сейчас»
 }
 
 const store = typeof indexedDB !== 'undefined' ? createStore('prioritize-ideas', 'projects') : undefined
