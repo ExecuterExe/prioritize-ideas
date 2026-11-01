@@ -72,3 +72,54 @@ export function Pulse({view, stage, host, hostPid, seen, network, onHostScreen}:
     </div>
   )
 }
+
+// ——— Проверка готовности (лобби): связь с каждым телефоном в обе стороны ———
+
+export type LinkStatus = 'ok' | 'waiting' | 'lost'
+
+export function linkStatus(pid: string, stageId: string, links: Record<string, string>, lastHeard: number | undefined, now: number): LinkStatus {
+  const recent = !!lastHeard && now - lastHeard <= PRESENCE_TIMEOUT
+  if (!recent) return lastHeard ? 'lost' : 'waiting'
+  return links[pid] === stageId ? 'ok' : 'waiting'
+}
+
+const LINK: Record<LinkStatus, {icon: string; label: string}> = {
+  ok: {icon: '✓', label: 'связь в обе стороны'},
+  waiting: {icon: '⏳', label: 'ждём подтверждения'},
+  lost: {icon: '📴', label: 'пропал со связи'}
+}
+
+export function ReadyCheck({view, stage, hostPid, links, seen, relays, storage}: {
+  view: PublicView; stage: Stage; hostPid: string; links: Record<string, string>; seen: Record<string, number>
+  relays: {open: number; total: number}; storage: boolean | null
+}) {
+  const now = useNow(2000)
+  const phones = stage.participants.filter(p => p.active && p.id !== hostPid)
+  const heard = (id: string) => Math.max(seen[id] ?? 0, stage.participants.find(p => p.id === id)?.lastSeen ?? 0)
+  const rows = phones.map(p => ({p, st: linkStatus(p.id, view.stageId, links, heard(p.id), now)}))
+  const ok = rows.filter(r => r.st === 'ok').length
+  const item = (good: boolean | null, title: string, note: string) => (
+    <div class="ready-item"><span class={`ready-mark ${good === null ? 'wait' : good ? 'ok' : 'bad'}`}>{good === null ? '…' : good ? '✓' : '!'}</span><b>{title}</b><span class="tiny muted">{note}</span></div>
+  )
+  return (
+    <div class="card stack no-print">
+      <div class="row between"><h3 style={{margin: 0}}>🩺 Проверка готовности</h3><span class={`chip ${phones.length && ok === phones.length ? 'ok' : ''}`}>{ok} из {phones.length} телефонов на связи</span></div>
+      <div class="ready-grid">
+        {item(storage, 'Сохранение на ноутбуке', storage === false ? 'браузер не даёт сохранять — сохраните проект в файл' : 'данные не потеряются при перезагрузке')}
+        {item(relays.total ? relays.open > 0 : null, 'Ретрансляторы', `подключено ${relays.open} из ${relays.total}${relays.open === 0 ? ' — проверьте интернет' : ''}`)}
+        {item(phones.length ? ok === phones.length : null, 'Обмен с телефонами', phones.length ? 'каждый телефон получил этап и ответил' : 'никто ещё не вошёл')}
+      </div>
+      {rows.length > 0 && (
+        <div class="pulse-people">
+          {rows.map(({p, st}) => (
+            <span class={`pulse-person ${st === 'ok' ? 'done' : st === 'lost' ? 'away' : 'working'}`} key={p.id} title={`${p.name}: ${LINK[st].label}`}>
+              <Avatar name={p.name} size={28} dim={st !== 'ok'} />
+              <span class="pulse-mark">{LINK[st].icon}</span>
+            </span>
+          ))}
+        </div>
+      )}
+      {rows.some(r => r.st !== 'ok') && <div class="tiny muted">⏳ — телефон вошёл, но ещё не подтвердил, что видит экран. Обычно это 2–5 секунд. Если дольше 20 секунд — пусть обновит страницу.</div>}
+    </div>
+  )
+}

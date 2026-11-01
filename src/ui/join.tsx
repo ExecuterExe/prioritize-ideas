@@ -14,6 +14,17 @@ import {hashKey} from '../core/evolve'
 import {AssumptionsPanel} from './assumptions'
 import {TasksPanel} from './tasks'
 import {createPortal} from 'preact/compat'
+import {toast} from './toast'
+
+// Строка состояния: сохранено ли всё и дошло ли до ведущего
+function SyncStatus({pending, offline}: {pending: number; offline: boolean}) {
+  const [cls, text] = offline
+    ? ['bad', `📴 Нет связи — всё сохранено на телефоне${pending ? `, ждёт отправки: ${pending}` : ''}. Отправим сами`]
+    : pending
+      ? ['warn', `⏳ Отправляем: ${pending}`]
+      : ['ok', '✓ Всё сохранено и отправлено']
+  return <div class={`sync-line ${cls}`} role="status">{text}</div>
+}
 
 export function JoinApp({roomId, secret}: {roomId: string; secret: string}) {
   const pidKey = `pi:pid:${roomId}`
@@ -83,6 +94,11 @@ export function JoinApp({roomId, secret}: {roomId: string; secret: string}) {
   const hostSeen = session?.hostSeen.value ?? 0
   useEffect(() => { if (hostSeen) setErr(null) }, [hostSeen])
   const stale = session && Date.now() - session.hostSeen.value > 25_000
+  // Досланное после обрыва связи — короткое подтверждение
+  const late = session?.lateDelivered.value ?? 0
+  useEffect(() => { if (late) toast('Связь вернулась — всё отправлено ✓') }, [late])
+  const lateErr = session?.lateError.value
+  useEffect(() => { if (lateErr) toast(lateErr, 'error') }, [lateErr])
   const tools = view && visibleTools(view.settings.tools, {assumptions: view.assumptions.length, tasks: view.tasks.length, roundOpen: view.round?.open})
   return (
     <div>
@@ -102,7 +118,7 @@ export function JoinApp({roomId, secret}: {roomId: string; secret: string}) {
       </div>
       <div class="narrow stack">
         <ErrorLine msg={err} />
-        {session && session.pendingCount.value > 0 && <div class="tiny muted">Отправляем… ({session.pendingCount.value})</div>}
+        {session && view && <SyncStatus pending={session.pendingCount.value} offline={net === 'offline' || !!stale} />}
         {stale && view && <div class="hint">Связь с организатором прервалась — переподключаемся. Ваши черновики сохранены на телефоне.</div>}
         {!view && (
           <div class="card stack">
@@ -137,7 +153,7 @@ export function JoinApp({roomId, secret}: {roomId: string; secret: string}) {
             <div class="muted">Связь подвела, поэтому команда продолжает на ноутбуке организатора по очереди. Подойдите, когда позовут. Ваши черновики сохранены — когда телефоны вернут, экран оживёт сам.</div>
           </div>
         )}
-        {view && session && !view.hostScreen && <ParticipantStage view={view} pid={pid} send={a => session.send(a)} storeKey={`pi:me:${view.stageId}:${pid}`} assignKey={hashKey(token)} />}
+        {view && session && !view.hostScreen && <ParticipantStage view={view} pid={pid} send={a => session.send(a)} storeKey={`pi:me:${view.stageId}:${pid}`} assignKey={hashKey(token)} late={session.lastLate.value} />}
       </div>
     </div>
   )

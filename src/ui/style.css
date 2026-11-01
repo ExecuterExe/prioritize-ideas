@@ -675,3 +675,18 @@ details.card-menu > summary { padding: 0 10px; font-size: 1.2rem; line-height: 1
 .branch-bar { display: grid; grid-template-columns: minmax(80px, 1fr) 2fr 32px; align-items: center; gap: 6px; }
 .branch-bar .bar { height: 8px; border-radius: 999px; background: var(--surface); overflow: hidden; }
 .branch-bar .bar i { display: block; height: 100%; background: linear-gradient(90deg, var(--violet), var(--mint)); }
+
+/* Проверка готовности */
+.ready-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 8px; }
+.ready-item { display: grid; grid-template-columns: 26px 1fr; column-gap: 8px; align-items: center; padding: 8px 10px; border-radius: var(--radius-sm); background: var(--surface-2); }
+.ready-item .tiny { grid-column: 2; }
+.ready-mark { grid-row: span 2; display: grid; place-items: center; width: 24px; height: 24px; border-radius: 999px; font-weight: 800; font-size: .8rem; }
+.ready-mark.ok { background: var(--ok); color: #fff; }
+.ready-mark.bad { background: var(--bad-soft); color: var(--bad); }
+.ready-mark.wait { background: var(--surface); color: var(--muted); }
+
+/* Строка синхронизации на телефоне */
+.sync-line { font-size: .8rem; font-weight: 700; padding: 4px 10px; border-radius: 999px; width: fit-content; }
+.sync-line.ok { color: var(--ok); background: var(--ok-soft); }
+.sync-line.warn { color: var(--warn); background: var(--warn-soft); }
+.sync-line.bad { color: var(--bad); background: var(--bad-soft); }

@@ -9,7 +9,7 @@ import {PHASE_LABEL, TAG_LABEL, type Criterion, type Settings, type Stage, type 
 import {fromB64u, importKey, randomBytes, sha256hex, toB64u} from '../net/crypto'
 import {NostrTransport, type RelayState} from '../net/nostr'
 import {HostSession} from '../net/session'
-import {deleteProject, downloadFile, listProjects, loadProject, lsGet, lsSet, saveProject, withStage, type StoredProject} from '../store/db'
+import {deleteProject, downloadFile, listProjects, loadProject, lsGet, lsSet, saveProject, storageOk, withStage, type StoredProject} from '../store/db'
 import {Avatar, Avatars, CardBody, ErrorLine, PhaseIntro, PhaseSteps, QR, Ring, Timer, phaseName, plural, stepLabel} from './common'
 import {JourneyHost, JourneySummary, journeyMarkdown} from './journey'
 import {BoardPanel} from './board'
@@ -26,7 +26,7 @@ import {ThreatNote} from './results'
 import {FREE_TEMPLATES, FULL_SETTINGS, GOALS, QUICK_SETTINGS, goalOf, goalWorkflow, visibleTools} from '../core/quickstart'
 import {planBranch, planFork, routeChain, type PathChoice, type PathStep} from '../core/route'
 import {WhatNextSheet} from './whatnext'
-import {Pulse} from './pulse'
+import {Pulse, ReadyCheck, linkStatus} from './pulse'
 import {CardMarks, CardMenu, EditCardSheet, HistorySheet} from './cardmenu'
 import {BranchBoard} from './branches'
 import {openScreen, screenSupported, useScreenFeed} from './screen'
@@ -679,6 +679,17 @@ function StageUI({project, session, transport, joinUrl, onExit, onNextStage, onB
   const [projector, setProjector] = useState(false)
   const [editPassport, setEditPassport] = useState(false)
   const [whatNext, setWhatNext] = useState(false)
+  // Для проверки готовности: ретрансляторы и хранилище
+  const [relays, setRelays] = useState({open: 0, total: 0})
+  const [storage, setStorage] = useState<boolean | null>(null)
+  useEffect(() => { void storageOk().then(setStorage) }, [])
+  useEffect(() => {
+    if (!transport) return
+    const read = () => { const st = transport.relayStates(); setRelays({open: st.filter(s => s.status === 'open').length, total: st.length}) }
+    read()
+    const t = setInterval(read, 2000)
+    return () => clearInterval(t)
+  }, [transport])
   // Окно для проектора получает ту же «слепую» картину, что и телефоны
   useScreenFeed(view, joinUrl, project.title)
   const [err, setErr] = useState<string | null>(null)
@@ -692,6 +703,11 @@ function StageUI({project, session, transport, joinUrl, onExit, onNextStage, onB
   const showsProgress = ['calibrate', 'shortlist', 'rate', 'rate2'].includes(view.phase)
 
   const next = () => {
+    if (view.phase === 'lobby' && network && !stage.hostScreen) {
+      const now = Date.now()
+      const unconfirmed = active.filter(p => p.id !== hostPid && linkStatus(p.id, view.stageId, session.links.value, Math.max(session.seen.value[p.id] ?? 0, p.lastSeen), now) !== 'ok')
+      if (unconfirmed.length && !confirm(`Связь не подтверждена: ${unconfirmed.map(p => p.name).join(', ')}. Начать без проверки?`)) return
+    }
     if ((view.phase === 'rate' || view.phase === 'rate2') && submitted < active.length &&
       !confirm(`Отправили ${submitted} из ${active.length}. Открыть результаты без остальных?`)) return
     if (view.phase === 'generate' && single === false) {
@@ -802,6 +818,9 @@ function StageUI({project, session, transport, joinUrl, onExit, onNextStage, onB
             <span>📴 Сессия идёт на этом ноутбуке — телефоны ждут. Связь вернулась?</span>
             <button class="small primary" onClick={() => { if (!host({type: 'session.hostScreen', on: false})) toast('Телефоны снова в игре') }}>📱 Вернуть телефоны</button>
           </div>
+        )}
+        {tab === 'panel' && !projector && view.phase === 'lobby' && network && !stage.hostScreen && (
+          <ReadyCheck view={view} stage={stage} hostPid={hostPid} links={session.links.value} seen={session.seen.value} relays={relays} storage={storage} />
         )}
         {tab === 'panel' && !projector && !['lobby', 'summary'].includes(view.phase) && view.template.mode !== 'journey' && (
           <Pulse view={view} stage={stage} host={host} hostPid={hostPid} seen={session.seen.value} network={network && !stage.hostScreen} onHostScreen={goHostScreen} />

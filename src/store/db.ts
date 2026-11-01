@@ -37,6 +37,18 @@ function migrate(p: StoredProject): StoredProject {
   return {...p, stages: p.stages.map(migrateStage), snapshots: (p.snapshots ?? []).map(sn => ({...sn, stage: migrateStage(sn.stage)}))}
 }
 
+// Работает ли хранилище браузера (в приватном окне или при запрете может не работать)
+export async function storageOk(): Promise<boolean> {
+  if (!tplStore) return false
+  try {
+    const v = Date.now()
+    await set('__probe', v, tplStore)
+    const ok = (await get<number>('__probe', tplStore)) === v
+    await del('__probe', tplStore)
+    return ok
+  } catch { return false }
+}
+
 export async function listProjects(): Promise<StoredProject[]> {
   if (!store) return []
   const ks = await keys(store)

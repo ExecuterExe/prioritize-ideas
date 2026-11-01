@@ -25,6 +25,7 @@ interface Props {
   send: Send
   storeKey: string // ключ localStorage для черновиков этого участника
   assignKey?: string // непрозрачный ключ назначений на шаге «Развитие»
+  late?: {a: Action; at: number} | null // действие, досланное в фоне после обрыва связи
 }
 
 interface LocalCard {
@@ -57,7 +58,7 @@ function useLocal(key: string): [Local, (f: (l: Local) => Local) => void] {
 
 const newId = () => Math.random().toString(36).slice(2, 12)
 
-export function ParticipantStage({view, pid, send, storeKey, assignKey}: Props) {
+export function ParticipantStage({view, pid, send, storeKey, assignKey, late}: Props) {
   const [local, update] = useLocal(storeKey)
   const myCardIds = useMemo(() => new Set(local.cards.map(c => c.id)), [local.cards])
   const isMine = (c: PublicCard) => myCardIds.has(c.id) || c.mergedIds.some(id => myCardIds.has(id))
@@ -84,7 +85,7 @@ export function ParticipantStage({view, pid, send, storeKey, assignKey}: Props) 
     case 'evolve':
       return <EvolveStep view={view} send={send} pid={pid} assignKey={assignKey ?? hashKey(pid)} storeKey={storeKey} />
     case 'generate':
-      return <Generate view={view} local={local} update={update} send={send} pid={pid} />
+      return <Generate view={view} local={local} update={update} send={send} pid={pid} late={late} />
     case 'merge':
       return <MergeView view={view} send={send} isMine={isMine} />
     case 'criteria':
@@ -113,9 +114,9 @@ export function ParticipantStage({view, pid, send, storeKey, assignKey}: Props) 
   }
 }
 
-type StepProps = {view: PublicView; local: Local; update: (f: (l: Local) => Local) => void; send: Send; pid: string}
+type StepProps = {view: PublicView; local: Local; update: (f: (l: Local) => Local) => void; send: Send; pid: string; late?: Props['late']}
 
-function Generate({view, local, update, send, pid}: StepProps) {
+function Generate({view, local, update, send, pid, late}: StepProps) {
   const tpl = view.template
   const [editing, setEditing] = useState<LocalCard | null>(null)
   const [formKey, setFormKey] = useState(0)
@@ -151,6 +152,15 @@ function Generate({view, local, update, send, pid}: StepProps) {
     return () => { stop = true }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [unsent.length])
+
+  // Карточка дошла позже, уже после «нет связи», — отмечаем отправленной
+  useEffect(() => {
+    if (late?.a.type !== 'card.upsert') return
+    const id = late.a.id
+    update(l => ({...l, cards: l.cards.map(c => (c.id === id ? {...c, sent: true} : c))}))
+    setErr(null)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [late?.at])
 
   const save = async () => {
     if (!editing) return
