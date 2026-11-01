@@ -33,6 +33,8 @@ import {BranchBoard} from './branches'
 import {HotkeyHelp, useHotkeys} from './hotkeys'
 import {FeedbackCard, feedbackMarkdown, type ServiceFeedback} from './feedback'
 import {VoteBallot, VoteHost} from './vote'
+import {CompletenessCard} from './completeness'
+import {openItems} from '../core/completeness'
 import {openScreen, screenSupported, useScreenFeed} from './screen'
 
 declare const __SINGLE__: boolean
@@ -727,6 +729,10 @@ function StageUI({project, session, transport, joinUrl, onExit, onNextStage, onB
       const unconfirmed = active.filter(p => p.id !== hostPid && linkStatus(p.id, view.stageId, session.links.value, Math.max(session.seen.value[p.id] ?? 0, p.lastSeen), now) !== 'ok')
       if (unconfirmed.length && !confirm(`Связь не подтверждена: ${unconfirmed.map(p => p.name).join(', ')}. Начать без проверки?`)) return
     }
+    if (view.phase === 'decide') {
+      const open = openItems(view)
+      if (open.length && !confirm(`Полнота решения: не закрыто — ${open.map(i => i.label.toLowerCase()).join(', ')}. Всё равно к итогам?`)) return
+    }
     if ((view.phase === 'rate' || view.phase === 'rate2') && submitted < active.length &&
       !confirm(`Отправили ${submitted} из ${active.length}. Открыть результаты без остальных?`)) return
     if (view.phase === 'generate' && single === false) {
@@ -1294,6 +1300,7 @@ function DecidePanel({view, host, asParticipant}: {view: PublicView; host: (a: A
           </div>
         )
       })}
+      {!isRisk && <CompletenessCard view={view} host={host} />}
     </div>
   )
 }

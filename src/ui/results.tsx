@@ -3,6 +3,7 @@ import {useState} from 'preact/hooks'
 import type {PublicView} from '../core/engine'
 import {asText, cardSubtitle, cardTitle, formatValue} from '../core/template'
 import {BranchCompare} from './branches'
+import {completenessMarkdown} from './completeness'
 import {Badges, CardBody, CountUp, Dist, Matrix} from './common'
 import {ComplianceCheck} from './passport'
 import {complianceItems, passportFilled, passportMarkdown} from '../core/passport'
@@ -178,6 +179,7 @@ export function buildMarkdown(view: PublicView, projectTitle: string, route: str
   if (view.sourceProblem) L.push(`**Исходим из:** ${view.sourceProblem}`, '')
   if (route.length > 1) L.push('## Как мы пришли к решению', '', ...route.map((r, i) => `${i + 1}. ${r}`), '')
   if (view.vote?.outcome) L.push(`**Как приняли решение:** ${view.vote.outcome.note}`, ...(view.vote.outcome.objections?.length ? ['', '**Возражения:**', ...view.vote.outcome.objections.map(o => `- ${o}`)] : []), '')
+  L.push(...completenessMarkdown(view))
   const marked = (ids: string[]) => ids.map(id => view.cards.find(c => c.id === id)).filter(c => !!c).map(c => cardTitle(view.template, c!.fields)).join('; ')
   if (view.pinned.length) L.push(`**📌 Закреплено ведущим:** ${marked(view.pinned)}`, '')
   if (view.carry.length) L.push(`**↗ Берём в следующий этап:** ${marked(view.carry)}`, '')

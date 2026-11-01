@@ -17,6 +17,7 @@ import {criterionReady} from './lint'
 import {TIMINGS, carryOver} from './timing'
 import {autoAssign, makeBranches, smallestBranch, type Branch} from './branches'
 import {ballotError, countVote, type Ballot, type Rule, type Vote, type VoteOutcome} from './decision'
+import type {CheckMark, CheckStatus} from './completeness'
 
 export const uid = (n = 10) => {
   const a = new Uint8Array(n)
@@ -148,6 +149,8 @@ export type Action =
   | {type: 'vote.cast'; ballot: Ballot}
   | {type: 'vote.reveal'}
   | {type: 'vote.cancel'}
+  | {type: 'check.set'; key: string; status: CheckStatus | null; text?: string}
+  | {type: 'revisit.set'; text: string}
   | {type: 'branch.join'; branchId: string}
   | {type: 'branch.assign'; pid: string; branchId: string}
   | {type: 'merge.suggest'; a: string; b: string}
@@ -195,7 +198,7 @@ export type Action =
 
 export const HOST_ONLY = new Set<Action['type']>([
   'phase.next', 'phase.back', 'deadline.extend', 'session.hostScreen',
-  'card.edit', 'card.restore', 'card.pin', 'card.duplicate', 'card.carry', 'card.return', 'branch.assign', 'vote.start', 'vote.reveal', 'vote.cancel', 'merge', 'unmerge', 'suggestion.dismiss', 'criterion.addLibrary',
+  'card.edit', 'card.restore', 'card.pin', 'card.duplicate', 'card.carry', 'card.return', 'branch.assign', 'vote.start', 'vote.reveal', 'vote.cancel', 'check.set', 'revisit.set', 'merge', 'unmerge', 'suggestion.dismiss', 'criterion.addLibrary',
   'criterion.update', 'criterion.remove', 'criterion.addCustom', 'settings.update', 'participant.setActive',
   'participant.add', 'participant.rename', 'calib.reveal', 'round2.start', 'decision.set',
   'passport.update', 'compliance.set', 'criterion.addFromPassport', 'round.open', 'round.reveal', 'round.close',
@@ -627,6 +630,19 @@ export function reduce(stage: Stage, action: Action, actor: string, isHost: bool
       }
       break
     }
+
+    case 'check.set': {
+      if (!['decide', 'board', 'summary'].includes(s.phase)) fail('Полноту решения проверяют после выбора')
+      const key = action.key.slice(0, 30)
+      const {[key]: _old, ...rest} = s.checks ?? {}
+      s.checks = action.status ? {...rest, [key]: {status: action.status, text: action.text?.trim().slice(0, 400) || undefined}} : rest
+      break
+    }
+
+    case 'revisit.set':
+      if (!['decide', 'board', 'summary'].includes(s.phase)) fail('Условие пересмотра записывают после выбора')
+      s.revisit = action.text.trim().slice(0, 300) || undefined
+      break
 
     case 'vote.cancel':
       s.vote = undefined
@@ -1125,6 +1141,8 @@ export interface PublicView {
   carry: string[]
   returned: Record<string, string>
   vote?: PublicVote
+  checks: Record<string, CheckMark>
+  revisit?: string
   branches?: Branch[]
   branchOf: Record<string, string>
   disputedForRound2: string[]
@@ -1208,6 +1226,7 @@ export function publicView(s: Stage, now: number): PublicView {
     mergeSuggestions: s.mergeSuggestions.map(({a, b}) => ({a, b})),
     pinned: hideCards ? [] : s.pinned ?? [], carry: hideCards ? [] : s.carry ?? [],
     returned: s.phase === 'merge' ? s.returned ?? {} : {},
+    checks: s.checks ?? {}, revisit: s.revisit,
     vote: s.vote && {
       rule: s.vote.rule, candidates: s.vote.candidates, candidateId: s.vote.candidateId, ownerId: s.vote.ownerId,
       open: s.vote.open, voted: Object.keys(s.vote.ballots), outcome: s.vote.outcome

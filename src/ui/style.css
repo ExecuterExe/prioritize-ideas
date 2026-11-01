@@ -701,3 +701,8 @@ kbd { display: inline-block; min-width: 26px; padding: 2px 8px; border-radius: 6
 .vote-outcome.no { background: var(--warn-soft); }
 .vote-ballot { box-shadow: 0 0 0 2px var(--violet), var(--shadow); }
 .rank-row { padding: 6px 10px; border-radius: var(--radius-sm); background: var(--surface-2); }
+
+/* Полнота решения */
+.completeness { box-shadow: 0 0 0 2px var(--mint), var(--shadow); }
+.check-row { padding: 10px 12px; border-radius: var(--radius-sm); background: var(--surface-2); gap: 6px; }
+.blind-spots { padding: 10px 12px; border-radius: var(--radius-sm); background: var(--warn-soft); }
