@@ -15,6 +15,7 @@ import {hashKey} from '../core/evolve'
 import {ResultsView, SummaryView} from './results'
 import {BranchPicker, MyBranchNote} from './branches'
 import {VoteBallot} from './vote'
+import {AttackPhone} from './attack'
 import {PassportView} from './passport'
 import {passportFilled} from '../core/passport'
 
@@ -105,6 +106,7 @@ export function ParticipantStage({view, pid, send, storeKey, assignKey, late}: P
           {view.phase === 'results'
             ? <PhaseIntro emoji="✨" title="Результаты открыты">У спорных ⚡ и «бриллиантов» 💎 можно анонимно добавить аргумент.</PhaseIntro>
             : <PhaseIntro emoji="🤝" title="Команда решает">{view.vote?.open ? 'Идёт голосование — ваш голос тайный.' : 'Организатор отмечает выбранное — следите за значками.'}</PhaseIntro>}
+          <AttackPhone view={view} pid={pid} send={send} />
           {view.phase === 'decide' && <VoteBallot view={view} pid={pid} send={send} />}
           <ResultsView view={view} send={send} canArgue pid={pid} />
         </div>

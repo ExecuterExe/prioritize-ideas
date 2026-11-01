@@ -35,6 +35,7 @@ import {FeedbackCard, feedbackMarkdown, type ServiceFeedback} from './feedback'
 import {VoteBallot, VoteHost} from './vote'
 import {CompletenessCard} from './completeness'
 import {CIRCLE_PHASES, CircleHost, ParkButton, ParkingCard} from './circle'
+import {AttackHost, AttackPhone} from './attack'
 import {openItems} from '../core/completeness'
 import {openScreen, screenSupported, useScreenFeed} from './screen'
 
@@ -703,6 +704,8 @@ function StageUI({project, session, transport, joinUrl, onExit, onNextStage, onB
   const [projector, setProjector] = useState(false)
   const [editPassport, setEditPassport] = useState(false)
   const [whatNext, setWhatNext] = useState(false)
+  // Один экран: кто сейчас пишет возражения или отмечает их за ноутбуком
+  const [attacker, setAttacker] = useState<{pid: string; shown: boolean} | null>(null)
   // Для проверки готовности: ретрансляторы и хранилище
   const [relays, setRelays] = useState({open: 0, total: 0})
   const [storage, setStorage] = useState<boolean | null>(null)
@@ -810,6 +813,7 @@ function StageUI({project, session, transport, joinUrl, onExit, onNextStage, onB
           setWhatNext(false)
           setTab('assume')
         }}
+        onAttack={id => { setWhatNext(false); if (!host({type: 'attack.start', targetId: id})) { setTab('panel'); toast('Атака началась — пишут возражения') } }}
         onBack={() => { setWhatNext(false); host({type: 'phase.back'}) }}
         onFinish={() => {
           setWhatNext(false)
@@ -877,6 +881,28 @@ function StageUI({project, session, transport, joinUrl, onExit, onNextStage, onB
           <CircleHost view={view} host={host} />
         )}
         {tab === 'panel' && !projector && WHAT_NEXT_PHASES.includes(view.phase) && <ParkingCard view={view} host={host} />}
+        {tab === 'panel' && !projector && view.attack && <AttackHost view={view} host={host} onSingle={single ? pid => setAttacker({pid, shown: false}) : undefined} />}
+        {attacker && view.attack && createPortal(
+          <div class="sheet-backdrop">
+            <div class="sheet" role="dialog" aria-label="Возражения">
+              {!attacker.shown
+                ? (
+                  <div class="curtain stack center">
+                    <h2>Передайте ноутбук: {view.participants.find(p => p.id === attacker.pid)?.name}</h2>
+                    <button class="primary" onClick={() => setAttacker({...attacker, shown: true})}>Это я, начать</button>
+                    <button class="ghost" onClick={() => setAttacker(null)}>Отмена</button>
+                  </div>
+                )
+                : (
+                  <div class="stack">
+                    <AttackPhone view={view} pid={attacker.pid} send={asParticipant(attacker.pid)} />
+                    <button class="primary" onClick={() => setAttacker(null)}>Готово, передать дальше</button>
+                  </div>
+                )}
+            </div>
+          </div>,
+          document.body
+        )}
         <div class="phase-enter" key={`${view.phase}-${tab}`}>
           {tab === 'panel' && (single
             ? <SingleScreen view={view} stage={stage} host={host} asParticipant={asParticipant} project={project} onNextStage={onNextStage} />

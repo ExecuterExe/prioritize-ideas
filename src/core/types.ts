@@ -5,6 +5,7 @@ import type {Branch} from './branches'
 import type {Vote} from './decision'
 import type {CheckMark} from './completeness'
 import type {Circle, ParkItem} from './circle'
+import type {Attack} from './attack'
 import type {ComplianceValue, Passport} from './passport'
 import type {Assumption, AssumptionRound, Experiment} from './assume'
 import type {ParentLink} from './evolve'
@@ -136,6 +137,7 @@ export interface Stage {
   revisit?: string // «Пересмотрим, если…»
   circle?: Circle // «Круг»: очередь высказываний
   parking?: ParkItem[] // «Парковка»: мысли не по теме шага
+  attack?: Attack // «Атакуем лидера»: возражения к выбранному варианту
   carry?: string[] // отмечены «взять в следующий этап»
   carried?: number // мс, перенесённые с прошлого шага (закончили раньше)
   hostScreen?: boolean // Wi-Fi подвёл: сессия идёт на ноутбуке ведущего

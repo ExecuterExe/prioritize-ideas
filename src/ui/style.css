@@ -717,3 +717,8 @@ kbd { display: inline-block; min-width: 26px; padding: 2px 8px; border-radius: 6
 .parking { box-shadow: 0 0 0 2px var(--warn), var(--shadow); }
 .park-row { display: flex; flex-direction: column; gap: 6px; padding: 8px 10px; border-radius: var(--radius-sm); background: var(--surface-2); }
 .icon-btn .badge { display: inline-grid; place-items: center; min-width: 16px; height: 16px; margin-left: 2px; padding: 0 4px; border-radius: 999px; background: var(--warn); color: #fff; font-size: 10px; font-weight: 800; }
+
+/* Атакуем лидера */
+.attack { box-shadow: 0 0 0 2px var(--bad), var(--shadow); }
+.objection { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 10px; border-radius: var(--radius-sm); background: var(--surface-2); }
+.objection.strong { background: var(--bad-soft); font-weight: 600; }

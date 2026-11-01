@@ -3,7 +3,7 @@ import {createPortal} from 'preact/compat'
 import type {Action, PublicView} from '../core/engine'
 import {uid} from '../core/engine'
 import {BUILTIN_TEMPLATES} from '../core/template'
-import {branchOptions, forkTemplate, leaderAssumption, planBranch, rankedCards, routeChain, type PathChoice} from '../core/route'
+import {branchOptions, focusCard, forkTemplate, leaderAssumption, planBranch, rankedCards, routeChain, type PathChoice} from '../core/route'
 import {cardTitle} from '../core/template'
 import {useState} from 'preact/hooks'
 import type {Stage} from '../core/types'
@@ -47,10 +47,11 @@ function ForkOption({stage, title, hint, onFork}: {stage: Stage; title: string; 
   )
 }
 
-export function WhatNextSheet({view, stage, project, single, onClose, onContinue, onBranch, onAssume, onBack, onFinish, asHost, onExit}: {
+export function WhatNextSheet({view, stage, project, single, onClose, onContinue, onBranch, onAssume, onBack, onFinish, asHost, onExit, onAttack}: {
   view: PublicView; stage: Stage; project: StoredProject; single: boolean
   onClose: () => void; onContinue: () => void; onBranch: (c: PathChoice, fork?: [string, string]) => void; onAssume: () => void
   onBack: () => void; onFinish: () => void; asHost: (a: Action) => Promise<string | null>; onExit: () => void
+  onAttack?: (targetId: string) => void // «⚔️ Атакуем лидера» — без нового этапа
 }) {
   const summary = view.phase === 'summary'
   const steps = project.workflow?.steps ?? []
@@ -87,6 +88,13 @@ export function WhatNextSheet({view, stage, project, single, onClose, onContinue
           <div class="next-label">Продолжить</div>
           <Option emoji="➡️" title={cont.title} hint={cont.hint} onClick={onContinue} primary />
         </div>
+
+        {onAttack && (view.phase === 'results' || view.phase === 'decide') && !view.attack && focusCard(stage) && (
+          <div class="next-group">
+            <div class="next-label">Проверить лидера</div>
+            <Option emoji="⚔️" title="Атакуем лидера" hint={`Каждый молча пишет возражения к «${cardTitle(stage.template, focusCard(stage)!.fields)}», потом отмечаем, какие реально влияют`} onClick={() => onAttack(focusCard(stage)!.id)} />
+          </div>
+        )}
 
         {options.length > 0 && (
           <div class="next-group">

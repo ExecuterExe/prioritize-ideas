@@ -19,6 +19,7 @@ import {autoAssign, makeBranches, smallestBranch, type Branch} from './branches'
 import {ballotError, countVote, type Ballot, type Rule, type Vote, type VoteOutcome} from './decision'
 import type {CheckMark, CheckStatus} from './completeness'
 import {PARK_LIMIT, advance, circleOrder, currentSpeaker, type Circle, type ParkItem, type ParkTarget} from './circle'
+import {ATTACK_LIMIT, attackResults, type AttackStep, type ObjectionResult} from './attack'
 
 export const uid = (n = 10) => {
   const a = new Uint8Array(n)
@@ -161,6 +162,13 @@ export type Action =
   | {type: 'circle.note'; text: string}
   | {type: 'park.add'; id: string; text: string}
   | {type: 'park.resolve'; id: string; to: ParkTarget | null}
+  | {type: 'attack.start'; targetId: string}
+  | {type: 'attack.add'; id: string; text: string}
+  | {type: 'attack.remove'; id: string}
+  | {type: 'attack.reveal'}
+  | {type: 'attack.mark'; ids: string[]}
+  | {type: 'attack.finish'}
+  | {type: 'attack.cancel'}
   | {type: 'branch.join'; branchId: string}
   | {type: 'branch.assign'; pid: string; branchId: string}
   | {type: 'merge.suggest'; a: string; b: string}
@@ -208,7 +216,8 @@ export type Action =
 
 export const HOST_ONLY = new Set<Action['type']>([
   'phase.next', 'phase.back', 'deadline.extend', 'session.hostScreen',
-  'card.edit', 'card.restore', 'card.pin', 'card.duplicate', 'card.carry', 'card.return', 'branch.assign', 'vote.start', 'vote.reveal', 'vote.cancel', 'check.set', 'revisit.set', 'circle.start', 'circle.next', 'circle.stop', 'park.resolve', 'merge', 'unmerge', 'suggestion.dismiss', 'criterion.addLibrary',
+  'card.edit', 'card.restore', 'card.pin', 'card.duplicate', 'card.carry', 'card.return', 'branch.assign', 'vote.start', 'vote.reveal', 'vote.cancel', 'check.set', 'revisit.set', 'circle.start', 'circle.next', 'circle.stop', 'park.resolve',
+  'attack.start', 'attack.reveal', 'attack.finish', 'attack.cancel', 'merge', 'unmerge', 'suggestion.dismiss', 'criterion.addLibrary',
   'criterion.update', 'criterion.remove', 'criterion.addCustom', 'settings.update', 'participant.setActive',
   'participant.add', 'participant.rename', 'calib.reveal', 'round2.start', 'decision.set',
   'passport.update', 'compliance.set', 'criterion.addFromPassport', 'round.open', 'round.reveal', 'round.close',
@@ -716,6 +725,61 @@ export function reduce(stage: Stage, action: Action, actor: string, isHost: bool
       break
     }
 
+    case 'attack.start':
+      if (s.phase !== 'results' && s.phase !== 'decide') fail('Атаковать лидера можно после раскрытия результатов')
+      if (!s.cards.some(c => c.id === action.targetId)) fail('Карточка не найдена')
+      s.attack = {targetId: action.targetId, step: 'write', objections: [], marks: {}}
+      break
+
+    case 'attack.add': {
+      const a = s.attack
+      if (a?.step !== 'write') fail('Возражения пишут до раскрытия')
+      if (!me && !isHost) fail('Сначала войдите в комнату')
+      const text = action.text.trim().slice(0, 300)
+      if (!text) fail('Сформулируйте возражение')
+      if (a!.objections.some(o => o.id === action.id)) break
+      if (a!.objections.filter(o => o.authorId === actor).length >= ATTACK_LIMIT) fail(`Не больше ${ATTACK_LIMIT} возражений — выберите самые сильные`)
+      a!.objections = [...a!.objections, {id: action.id.slice(0, 20), text, authorId: actor}]
+      break
+    }
+
+    case 'attack.remove': {
+      const a = s.attack
+      if (a?.step !== 'write') fail('Удалять можно до раскрытия')
+      const o = a!.objections.find(x => x.id === action.id)
+      if (o && (o.authorId === actor || isHost)) a!.objections = a!.objections.filter(x => x !== o)
+      break
+    }
+
+    case 'attack.reveal': {
+      const a = s.attack ?? fail('Атака не начата')
+      if (a.step !== 'write') fail('Уже раскрыто')
+      if (!a.objections.length) fail('Пока нет ни одного возражения')
+      // Перемешиваем по случайным id: порядок не должен выдавать, кто что написал
+      a.objections = [...a.objections].sort((x, y) => x.id.localeCompare(y.id))
+      a.step = 'vote'
+      break
+    }
+
+    case 'attack.mark': {
+      const a = s.attack
+      if (a?.step !== 'vote') fail('Отмечать можно после раскрытия')
+      if (!me && !isHost) fail('Сначала войдите в комнату')
+      a!.marks = {...a!.marks, [actor]: action.ids.filter(id => a!.objections.some(o => o.id === id))}
+      break
+    }
+
+    case 'attack.finish': {
+      const a = s.attack ?? fail('Атака не начата')
+      if (a.step !== 'vote') fail('Сначала раскройте возражения')
+      a.step = 'done'
+      break
+    }
+
+    case 'attack.cancel':
+      s.attack = undefined
+      break
+
     case 'vote.cancel':
       s.vote = undefined
       break
@@ -1157,6 +1221,15 @@ export interface PublicCard {
   branchId?: string
 }
 
+export interface PublicAttack {
+  targetId: string
+  step: AttackStep
+  written: Record<string, number>
+  objections: {id: string; text: string}[]
+  marked: string[]
+  results?: ObjectionResult[]
+}
+
 // Голосование наружу: кто проголосовал — видно, как именно — нет; после раскрытия — только итог
 export interface PublicVote {
   rule: Vote['rule']
@@ -1217,6 +1290,7 @@ export interface PublicView {
   revisit?: string
   circle?: Circle
   parking: ParkItem[]
+  attack?: PublicAttack
   branches?: Branch[]
   branchOf: Record<string, string>
   disputedForRound2: string[]
@@ -1301,6 +1375,14 @@ export function publicView(s: Stage, now: number): PublicView {
     pinned: hideCards ? [] : s.pinned ?? [], carry: hideCards ? [] : s.carry ?? [],
     returned: s.phase === 'merge' ? s.returned ?? {} : {},
     checks: s.checks ?? {}, revisit: s.revisit, circle: s.circle, parking: s.parking ?? [],
+    attack: s.attack && {
+      targetId: s.attack.targetId, step: s.attack.step,
+      // Пока пишут — видно только, кто сколько написал; тексты без авторов — после раскрытия
+      written: Object.fromEntries(activeParticipants(s).map(p => [p.id, s.attack!.objections.filter(o => o.authorId === p.id).length])),
+      objections: s.attack.step === 'write' ? [] : s.attack.objections.map(o => ({id: o.id, text: o.text})),
+      marked: Object.keys(s.attack.marks),
+      results: s.attack.step === 'done' ? attackResults(s.attack) : undefined
+    },
     vote: s.vote && {
       rule: s.vote.rule, candidates: s.vote.candidates, candidateId: s.vote.candidateId, ownerId: s.vote.ownerId,
       open: s.vote.open, voted: Object.keys(s.vote.ballots), outcome: s.vote.outcome
