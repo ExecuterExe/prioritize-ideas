@@ -4,6 +4,7 @@ import type {PublicView} from '../core/engine'
 import {asText, cardSubtitle, cardTitle, formatValue} from '../core/template'
 import {BranchCompare} from './branches'
 import {completenessMarkdown} from './completeness'
+import {BeforeAfterCard, ConfChip, beforeAfterMarkdown} from './confidence'
 import {Badges, CardBody, CountUp, Dist, Matrix} from './common'
 import {ComplianceCheck} from './passport'
 import {complianceItems, passportFilled, passportMarkdown} from '../core/passport'
@@ -73,6 +74,7 @@ export function ResultsView({view, send, canArgue, isHost = false, pid}: {view: 
                   {decision?.status === 'chosen' && <span class="chip ok">{view.template.kind === 'risk' ? RISK_STATUS_LABEL.chosen : '✅ Выбрано'}</span>}
                   {decision?.status === 'deferred' && <span class="chip warn">{view.template.kind === 'risk' ? RISK_STATUS_LABEL.deferred : '⏸ Отложено'}</span>}
                   {decision?.status === 'rejected' && <span class="chip bad">{view.template.kind === 'risk' ? RISK_STATUS_LABEL.rejected : '✖ Отклонено'}</span>}
+                  <ConfChip view={view} cardId={r.cardId} score={r.score} />
                   <Badges r={r} />
                   {critical.has(r.cardId) && <span class="chip bad" title="Вероятность и ущерб — в среднем 3,5 и выше">🔥 Критический риск</span>}
                   {send && r.guess && <AssumeButton view={view} cardId={r.cardId} send={send} />}
@@ -184,6 +186,7 @@ export function buildMarkdown(view: PublicView, projectTitle: string, route: str
     L.push(`## ⚔️ Проверка лидера${t ? `: ${cardTitle(view.template, t.fields)}` : ''}`, '', ...view.attack.results.map(r => `- ${r.strong ? '🔥 ' : ''}${r.text} (${r.votes})`), '')
   }
   L.push(...completenessMarkdown(view))
+  L.push(...beforeAfterMarkdown(view))
   const marked = (ids: string[]) => ids.map(id => view.cards.find(c => c.id === id)).filter(c => !!c).map(c => cardTitle(view.template, c!.fields)).join('; ')
   if (view.pinned.length) L.push(`**📌 Закреплено ведущим:** ${marked(view.pinned)}`, '')
   if (view.carry.length) L.push(`**↗ Берём в следующий этап:** ${marked(view.carry)}`, '')
@@ -323,6 +326,7 @@ export function SummaryView({view, projectTitle, extra, route}: {view: PublicVie
     <div class="stack">
       {view.template.kind === 'risk' && view.results && <RiskRegister view={view} />}
       {view.board && <BoardPanel view={view} />}
+      <BeforeAfterCard view={view} />
       {chosen.length > 0 && (
       <div class="card">
         <h2>Итог</h2>

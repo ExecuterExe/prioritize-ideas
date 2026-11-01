@@ -6,6 +6,7 @@ import type {Vote} from './decision'
 import type {CheckMark} from './completeness'
 import type {Circle, ParkItem} from './circle'
 import type {Attack} from './attack'
+import type {ConfMark, Pulse} from './confidence'
 import type {ComplianceValue, Passport} from './passport'
 import type {Assumption, AssumptionRound, Experiment} from './assume'
 import type {ParentLink} from './evolve'
@@ -39,6 +40,7 @@ export interface Settings {
   timePreset: TimePreset
   // Быстрый режим прячет продвинутые инструменты в «Ещё инструменты»; нет поля — значит «всё видно»
   tools?: Toolset
+  beforeAfter?: boolean // спросить «какой вариант лучший» до оценки и после решения
 }
 
 export type Toolset = 'quick' | 'full'
@@ -138,6 +140,8 @@ export interface Stage {
   circle?: Circle // «Круг»: очередь высказываний
   parking?: ParkItem[] // «Парковка»: мысли не по теме шага
   attack?: Attack // «Атакуем лидера»: возражения к выбранному варианту
+  confidence?: ConfMark[] // уверенность в своих оценках (по карточкам, первый раунд)
+  pulse?: Pulse // замер «до и после» обсуждения
   carry?: string[] // отмечены «взять в следующий этап»
   carried?: number // мс, перенесённые с прошлого шага (закончили раньше)
   hostScreen?: boolean // Wi-Fi подвёл: сессия идёт на ноутбуке ведущего

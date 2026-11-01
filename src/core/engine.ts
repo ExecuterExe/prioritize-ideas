@@ -20,6 +20,7 @@ import {ballotError, countVote, type Ballot, type Rule, type Vote, type VoteOutc
 import type {CheckMark, CheckStatus} from './completeness'
 import {PARK_LIMIT, advance, circleOrder, currentSpeaker, type Circle, type ParkItem, type ParkTarget} from './circle'
 import {ATTACK_LIMIT, attackResults, type AttackStep, type ObjectionResult} from './attack'
+import {beforeAfter, confidenceByCard, validConf, type BeforeAfter} from './confidence'
 
 export const uid = (n = 10) => {
   const a = new Uint8Array(n)
@@ -28,7 +29,7 @@ export const uid = (n = 10) => {
 }
 
 export const DEFAULT_SETTINGS: Settings = {
-  anonymous: true, cardLimit: 3, excludeAuthor: false, calibration: true, secondRound: true, evolve: true, timePreset: 'standard'
+  anonymous: true, cardLimit: 3, excludeAuthor: false, calibration: true, secondRound: true, evolve: true, timePreset: 'standard', beforeAfter: true
 }
 
 // Минуты на шаг по сценарию (раздел 3 PLAN.md) — в timing.ts
@@ -178,7 +179,8 @@ export type Action =
   | {type: 'criterion.propose'; name: string; question: string; anchors: {1: string; 3?: string; 5: string}; tag?: Tag; libraryKey?: string}
   | {type: 'calib.submit'; ratings: {criterionId: string; value: Score | null}[]}
   | {type: 'approve.submit'; cardIds: string[]}
-  | {type: 'rate.submit'; round: 1 | 2; ratings: {cardId: string; criterionId: string; value: Score | null}[]; bases: {cardId: string; basis: Basis}[]}
+  | {type: 'rate.submit'; round: 1 | 2; ratings: {cardId: string; criterionId: string; value: Score | null}[]; bases: {cardId: string; basis: Basis}[]; confidence?: {cardId: string; value: number}[]}
+  | {type: 'pulse.answer'; when: 'before' | 'after'; cardId: string; conf: number}
   | {type: 'arg.add'; cardId: string; side: 'pro' | 'con'; text: string}
   // организатор
   | {type: 'phase.next'}
@@ -912,8 +914,22 @@ export function reduce(stage: Stage, action: Action, actor: string, isHost: bool
       if (action.round === 1) {
         s.bases = s.bases.filter(b => b.raterId !== actor)
           .concat(action.bases.filter(b => cardIds.includes(b.cardId)).map(b => ({raterId: actor, cardId: b.cardId, basis: b.basis})))
+        s.confidence = (s.confidence ?? []).filter(m => m.raterId !== actor)
+          .concat((action.confidence ?? []).filter(m => cardIds.includes(m.cardId) && validConf(m.value)).map(m => ({raterId: actor, cardId: m.cardId, value: m.value})))
       }
       markSubmitted(s, phase, actor)
+      break
+    }
+
+    case 'pulse.answer': {
+      if (!me) fail('Сначала войдите в комнату')
+      if (s.settings.beforeAfter === false) fail('Замер «до и после» выключен')
+      const ok = action.when === 'before' ? ['merge', 'criteria', 'calibrate', 'shortlist'].includes(s.phase) : ['decide', 'board', 'summary'].includes(s.phase)
+      if (!ok) fail(action.when === 'before' ? 'Ответ «до» — до начала оценки' : 'Ответ «после» — после раскрытия и решения')
+      if (!realCards(s).some(c => c.id === action.cardId)) fail('Выберите вариант')
+      if (!validConf(action.conf)) fail('Отметьте уверенность от 1 до 5')
+      const pulse = s.pulse ?? {before: {}, after: {}}
+      s.pulse = {...pulse, [action.when]: {...pulse[action.when], [actor]: {cardId: action.cardId, conf: action.conf}}}
       break
     }
 
@@ -1291,6 +1307,8 @@ export interface PublicView {
   circle?: Circle
   parking: ParkItem[]
   attack?: PublicAttack
+  confidence: Record<string, {avg: number; n: number}>
+  pulse: {before: string[]; after: string[]; summary?: BeforeAfter}
   branches?: Branch[]
   branchOf: Record<string, string>
   disputedForRound2: string[]
@@ -1375,6 +1393,12 @@ export function publicView(s: Stage, now: number): PublicView {
     pinned: hideCards ? [] : s.pinned ?? [], carry: hideCards ? [] : s.carry ?? [],
     returned: s.phase === 'merge' ? s.returned ?? {} : {},
     checks: s.checks ?? {}, revisit: s.revisit, circle: s.circle, parking: s.parking ?? [],
+    // Уверенность — только после раскрытия; «до и после» — кто ответил, а сводка — после ответов «после»
+    confidence: AFTER_REVEAL.includes(s.phase) ? confidenceByCard(s.confidence ?? []) : {},
+    pulse: {
+      before: Object.keys(s.pulse?.before ?? {}), after: Object.keys(s.pulse?.after ?? {}),
+      summary: s.pulse && Object.keys(s.pulse.after).length ? beforeAfter(s.pulse) : undefined
+    },
     attack: s.attack && {
       targetId: s.attack.targetId, step: s.attack.step,
       // Пока пишут — видно только, кто сколько написал; тексты без авторов — после раскрытия

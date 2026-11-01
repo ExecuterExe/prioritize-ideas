@@ -30,12 +30,12 @@ export const FREE_TEMPLATES = ['problem', 'idea', 'hypothesis', 'premortem', 'jo
 
 export const QUICK_SETTINGS: Partial<Settings> = {
   timePreset: 'standard', anonymous: true, cardLimit: 3, excludeAuthor: false,
-  calibration: false, secondRound: true, evolve: false, tools: 'quick'
+  calibration: false, secondRound: true, evolve: false, tools: 'quick', beforeAfter: false
 }
 
 export const FULL_SETTINGS: Partial<Settings> = {
   timePreset: 'standard', anonymous: true, cardLimit: 3, excludeAuthor: false,
-  calibration: true, secondRound: true, evolve: true, tools: 'full'
+  calibration: true, secondRound: true, evolve: true, tools: 'full', beforeAfter: true
 }
 
 export function goalWorkflow(g: Goal, freeTemplate?: string): Workflow {

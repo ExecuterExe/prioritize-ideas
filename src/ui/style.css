@@ -722,3 +722,8 @@ kbd { display: inline-block; min-width: 26px; padding: 2px 8px; border-radius: 6
 .attack { box-shadow: 0 0 0 2px var(--bad), var(--shadow); }
 .objection { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 6px 10px; border-radius: var(--radius-sm); background: var(--surface-2); }
 .objection.strong { background: var(--bad-soft); font-weight: 600; }
+
+/* Уверенность */
+.conf-row { gap: 4px; align-items: center; }
+.conf-row button { min-width: 34px; }
+.pulse-q { box-shadow: 0 0 0 2px var(--violet), var(--shadow); }

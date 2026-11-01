@@ -565,6 +565,7 @@ function SettingsFields({settings, onChange}: {settings: Settings; onChange: (p:
       <label class="check"><input type="checkbox" checked={!!settings.evolve && !express} disabled={express} onChange={e => onChange({evolve: (e.target as HTMLInputElement).checked})} />Шаг «Развитие» — развить и объединить чужие идеи (7 мин)</label>
       <label class="check"><input type="checkbox" checked={settings.calibration && !express} disabled={express} onChange={e => onChange({calibration: (e.target as HTMLInputElement).checked})} />Калибровка шкал (2 мин)</label>
       <label class="check"><input type="checkbox" checked={settings.secondRound && !express} disabled={express} onChange={e => onChange({secondRound: (e.target as HTMLInputElement).checked})} />Второй раунд по спорным</label>
+      <label class="check"><input type="checkbox" checked={settings.beforeAfter !== false} onChange={e => onChange({beforeAfter: (e.target as HTMLInputElement).checked})} />Замер «до и после»: какой вариант лучший — до оценки и после решения</label>
       <label class="row small">Карточек на человека:
         <select style={{width: 'auto'}} value={settings.cardLimit} onChange={e => onChange({cardLimit: Number((e.target as HTMLSelectElement).value)})}>
           {[1, 2, 3, 4, 5].map(n => <option key={n} value={n}>{n}</option>)}

@@ -16,6 +16,7 @@ import {ResultsView, SummaryView} from './results'
 import {BranchPicker, MyBranchNote} from './branches'
 import {VoteBallot} from './vote'
 import {AttackPhone} from './attack'
+import {ConfButtons, PulseQuestion} from './confidence'
 import {PassportView} from './passport'
 import {passportFilled} from '../core/passport'
 
@@ -43,6 +44,7 @@ interface Local {
   bases: Record<string, Basis>
   approvals: string[]
   calib: Record<string, Score | null>
+  conf?: Record<string, number> // уверенность в оценке карточки, 1–5
 }
 
 const EMPTY: Local = {cards: [], ratings: {}, bases: {}, approvals: [], calib: {}}
@@ -91,7 +93,7 @@ export function ParticipantStage({view, pid, send, storeKey, assignKey, late}: P
     case 'merge':
       return <MergeView view={view} send={send} isMine={isMine} />
     case 'criteria':
-      return <CriteriaPropose view={view} send={send} />
+      return <div class="stack"><PulseQuestion view={view} pid={pid} send={send} when="before" /><CriteriaPropose view={view} send={send} /></div>
     case 'calibrate':
       return <Calibrate view={view} local={local} update={update} send={send} pid={pid} />
     case 'shortlist':
@@ -108,13 +110,14 @@ export function ParticipantStage({view, pid, send, storeKey, assignKey, late}: P
             : <PhaseIntro emoji="🤝" title="Команда решает">{view.vote?.open ? 'Идёт голосование — ваш голос тайный.' : 'Организатор отмечает выбранное — следите за значками.'}</PhaseIntro>}
           <AttackPhone view={view} pid={pid} send={send} />
           {view.phase === 'decide' && <VoteBallot view={view} pid={pid} send={send} />}
+          {view.phase === 'decide' && <PulseQuestion view={view} pid={pid} send={send} when="after" />}
           <ResultsView view={view} send={send} canArgue pid={pid} />
         </div>
       )
     case 'board':
       return <BoardPanel view={view} />
     case 'summary':
-      return <SummaryView view={view} projectTitle={view.title} />
+      return <div class="stack"><PulseQuestion view={view} pid={pid} send={send} when="after" /><SummaryView view={view} projectTitle={view.title} /></div>
   }
 }
 
@@ -488,7 +491,8 @@ function Rate({view, local, update, send, pid, round, isMine}: StepProps & {roun
     const r = await send({
       type: 'rate.submit', round,
       ratings: cards.flatMap(c => crit.map(cr => ({cardId: c.id, criterionId: cr.id, value: local.ratings[key(c.id, cr.id)] ?? null}))),
-      bases: round === 1 ? cards.filter(c => local.bases[c.id]).map(c => ({cardId: c.id, basis: local.bases[c.id]})) : []
+      bases: round === 1 ? cards.filter(c => local.bases[c.id]).map(c => ({cardId: c.id, basis: local.bases[c.id]})) : [],
+      confidence: round === 1 ? cards.filter(c => local.conf?.[c.id]).map(c => ({cardId: c.id, value: local.conf![c.id]})) : undefined
     })
     setBusy(false)
     setErr(r)
@@ -532,6 +536,8 @@ function Rate({view, local, update, send, pid, round, isMine}: StepProps & {roun
               <button key={b} class={`small ${local.bases[card.id] === b ? 'selected' : ''}`} onClick={() => update(l => ({...l, bases: {...l.bases, [card.id]: b}}))}>{BASIS_LABEL[b]}</button>
             ))}
           </div>
+          <div class="small" style={{fontWeight: 600, margin: '10px 0 4px'}}>Насколько вы уверены в оценках этой карточки?</div>
+          <ConfButtons value={local.conf?.[card.id]} onChange={v => update(l => ({...l, conf: {...(l.conf ?? {}), [card.id]: v}}))} />
         </div>
       )}
       <div class="row">
