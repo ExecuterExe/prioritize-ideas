@@ -24,10 +24,11 @@ import {EMPTY_PASSPORT, passportFilled, type Passport} from '../core/passport'
 import {AssumptionsPanel} from './assumptions'
 import {ThreatNote} from './results'
 import {FREE_TEMPLATES, FULL_SETTINGS, GOALS, QUICK_SETTINGS, goalOf, goalWorkflow, visibleTools} from '../core/quickstart'
-import {planBranch, routeChain, type PathChoice, type PathStep} from '../core/route'
+import {planBranch, planFork, routeChain, type PathChoice, type PathStep} from '../core/route'
 import {WhatNextSheet} from './whatnext'
 import {Pulse} from './pulse'
 import {CardMarks, CardMenu, EditCardSheet, HistorySheet} from './cardmenu'
+import {BranchBoard} from './branches'
 import {openScreen, screenSupported, useScreenFeed} from './screen'
 
 declare const __SINGLE__: boolean
@@ -634,15 +635,16 @@ function StageScreen({projectId, stageId, onExit, onNextStage, onOpenStage}: {
 
   if (!project || !session) return <div class="wrap">Загрузка…</div>
   // «Другой путь»: новый этап в том же проекте и комнате, текущий остаётся со всеми оценками
-  const branch = async (choice: PathChoice) => {
+  const branch = async (choice: PathChoice, fork?: [string, string]) => {
     const cur = session.stage.value
-    const plan = planBranch(cur, choice)
+    const plan = choice === 'fork' && fork ? planFork(cur, fork) : planBranch(cur, choice)
     if (!plan) return
     clearTimeout(saveTimer.current)
     const p0 = withStage(projectRef.current!, cur)
     let {project: next, stage} = await launchStage(p0, {title: p0.title, hostName: p0.hostName, mode: p0.mode, workflow: p0.workflow, path: {fromStageId: cur.id, choice}}, {
-      template: plan.template, title: plan.title, settings: {...cur.settings},
-      sourceProblem: plan.sourceProblem, sourceFields: plan.sourceFields, seedCards: plan.seedCards, seedCriteria: plan.seedCriteria, persona: plan.persona
+      template: plan.template, title: plan.title, settings: {...cur.settings, ...plan.settings},
+      sourceProblem: plan.sourceProblem, sourceFields: plan.sourceFields, seedCards: plan.seedCards, seedCriteria: plan.seedCriteria, persona: plan.persona,
+      branches: plan.branches
     })
     // На одном экране участники не входят сами — переносим команду в новый этап
     if (p0.mode === 'single') {
@@ -662,7 +664,7 @@ type Tab = 'panel' | 'me' | 'assume' | 'tasks' | 'diag'
 
 function StageUI({project, session, transport, joinUrl, onExit, onNextStage, onBranch}: {
   project: StoredProject; session: HostSession; transport: NostrTransport | null; joinUrl: string
-  onExit: () => void; onNextStage: (p: StoredProject, fromStageId: string) => void; onBranch: (c: PathChoice) => Promise<void>
+  onExit: () => void; onNextStage: (p: StoredProject, fromStageId: string) => void; onBranch: (c: PathChoice, fork?: [string, string]) => Promise<void>
 }) {
   const view = session.view.value
   const stage = session.stage.value
@@ -745,7 +747,7 @@ function StageUI({project, session, transport, joinUrl, onExit, onNextStage, onB
           if (view.phase === 'summary') onNextStage(project, view.stageId)
           else next()
         }}
-        onBranch={c => { setWhatNext(false); void onBranch(c) }}
+        onBranch={(c, fork) => { setWhatNext(false); void onBranch(c, fork) }}
         onAssume={() => {
           setWhatNext(false)
           setTab('assume')
@@ -881,6 +883,7 @@ function HostPanel({view, stage, host, joinUrl, project, projector, onNextStage}
             <div class="tiny muted">Ключ шифрования — в части ссылки после «#». Отправляйте ссылку только своей команде.</div>
           </div>
           <div class="stack">
+            <BranchBoard view={view} host={host} />
             <Participants stage={stage} host={host} />
             {!projector && <details class="card more"><summary>Настройки сессии</summary><div style={{marginTop: 8}}><SettingsFields settings={stage.settings} onChange={patch => host({type: 'settings.update', patch})} /></div></details>}
           </div>
@@ -891,6 +894,7 @@ function HostPanel({view, stage, host, joinUrl, project, projector, onNextStage}
       return (
         <div class="stack">
           <PhaseIntro emoji="🤫" title="Тихо пишем">Каждый сам, без обсуждения. Чужие карточки откроются на следующем шаге.</PhaseIntro>
+          <BranchBoard view={view} host={host} />
           <div class="card stack">
             <b>Карточек написано: {Object.values(view.cardCounts).reduce((a, b) => a + b, 0)}</b>
             <div class="avatars">
@@ -1279,6 +1283,7 @@ function SingleScreen({view, stage, host, asParticipant, project, onNextStage}: 
       <div class="stack">
         {passportFilled(view.passport) && <div class="card"><h3>📋 Задание</h3><PassportView p={view.passport!} /></div>}
         {view.template.mode === 'journey' && <JourneyHost view={view} host={host} />}
+        <BranchBoard view={view} host={host} />
         <div class="card stack">
           <h3>Кто участвует</h3>
           <div class="row">{stage.participants.map(p => <span class="chip" key={p.id}>{p.name}</span>)}</div>

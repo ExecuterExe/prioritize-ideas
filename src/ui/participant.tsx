@@ -13,6 +13,7 @@ import {BoardPanel} from './board'
 import {JourneyParticipant} from './journey'
 import {hashKey} from '../core/evolve'
 import {ResultsView, SummaryView} from './results'
+import {BranchPicker, MyBranchNote} from './branches'
 import {PassportView} from './passport'
 import {passportFilled} from '../core/passport'
 
@@ -72,6 +73,7 @@ export function ParticipantStage({view, pid, send, storeKey, assignKey}: Props) 
         <div class="stack">
           <PhaseIntro emoji="👋" title={`Привет, ${me.name}!`}>Вы в комнате. Как только все соберутся, организатор начнёт.</PhaseIntro>
           {passportFilled(view.passport) && <div class="card"><h3>📋 Задание</h3><PassportView p={view.passport!} /><div class="tiny muted" style={{marginTop: 8}}>Задание всегда под рукой — кнопка 📋 вверху экрана.</div></div>}
+          <BranchPicker view={view} pid={pid} send={send} />
           <div class="card stack">
             <b>Уже здесь</b>
             <Avatars people={view.participants.filter(p => p.active)} />
@@ -113,7 +115,7 @@ export function ParticipantStage({view, pid, send, storeKey, assignKey}: Props) 
 
 type StepProps = {view: PublicView; local: Local; update: (f: (l: Local) => Local) => void; send: Send; pid: string}
 
-function Generate({view, local, update, send}: StepProps) {
+function Generate({view, local, update, send, pid}: StepProps) {
   const tpl = view.template
   const [editing, setEditing] = useState<LocalCard | null>(null)
   const [formKey, setFormKey] = useState(0)
@@ -181,6 +183,8 @@ function Generate({view, local, update, send}: StepProps) {
         {tpl.intro ? `${tpl.intro} ` : ''}Пишите сами, не советуясь. До {plural(limit, 'карточки', 'карточек', 'карточек')}.
       </PhaseIntro>
       {view.sourceProblem && <div class="note"><b>Исходим из:</b> {view.sourceProblem}</div>}
+      <MyBranchNote view={view} pid={pid} />
+      {view.branches && local.cards.length === 0 && <BranchPicker view={view} pid={pid} send={send} />}
       <div class="stagger stack">
       {local.cards.map(c => (
         <div class="card" key={c.id}>

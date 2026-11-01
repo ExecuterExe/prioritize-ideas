@@ -3,7 +3,9 @@ import {createPortal} from 'preact/compat'
 import type {Action, PublicView} from '../core/engine'
 import {uid} from '../core/engine'
 import {BUILTIN_TEMPLATES} from '../core/template'
-import {branchOptions, leaderAssumption, planBranch, routeChain, type PathChoice} from '../core/route'
+import {branchOptions, forkTemplate, leaderAssumption, planBranch, rankedCards, routeChain, type PathChoice} from '../core/route'
+import {cardTitle} from '../core/template'
+import {useState} from 'preact/hooks'
 import type {Stage} from '../core/types'
 import {downloadFile, type StoredProject} from '../store/db'
 import {buildMarkdown} from './results'
@@ -18,9 +20,36 @@ function Option({emoji, title, hint, onClick, primary}: {emoji: string; title: s
   )
 }
 
+// Развилка: выбираем две карточки — у каждой ветки своё направление
+function ForkOption({stage, title, hint, onFork}: {stage: Stage; title: string; hint: string; onFork: (pair: [string, string]) => void}) {
+  const cards = rankedCards(stage)
+  const [open, setOpen] = useState(false)
+  const [a, setA] = useState(cards[0]?.id ?? '')
+  const [b, setB] = useState(cards[1]?.id ?? '')
+  if (!open) return <Option emoji="⑂" title={title} hint={hint} onClick={() => setOpen(true)} />
+  const tpl = forkTemplate(stage)
+  const pick = (v: string, set: (x: string) => void) => (
+    <select value={v} onChange={e => set((e.target as HTMLSelectElement).value)}>
+      {cards.map(c => <option key={c.id} value={c.id}>{cardTitle(stage.template, c.fields)}</option>)}
+    </select>
+  )
+  return (
+    <div class="next-option main stack" style={{cursor: 'default'}}>
+      <b>⑂ Две ветки: {tpl ? `${tpl.emoji} ${tpl.name}` : ''} для двух направлений</b>
+      <label class="field"><span>Ветка A</span>{pick(a, setA)}</label>
+      <label class="field"><span>Ветка B</span>{pick(b, setB)}</label>
+      <small>Каждый выберет ветку на телефоне (кто не выбрал — разложим поровну). Пишут по своей ветке, оценивают все вместе.</small>
+      <div class="row">
+        <button class="primary small" disabled={!a || !b || a === b} onClick={() => onFork([a, b])}>Разделиться →</button>
+        <button class="ghost small" onClick={() => setOpen(false)}>Отмена</button>
+      </div>
+    </div>
+  )
+}
+
 export function WhatNextSheet({view, stage, project, single, onClose, onContinue, onBranch, onAssume, onBack, onFinish, asHost, onExit}: {
   view: PublicView; stage: Stage; project: StoredProject; single: boolean
-  onClose: () => void; onContinue: () => void; onBranch: (c: PathChoice) => void; onAssume: () => void
+  onClose: () => void; onContinue: () => void; onBranch: (c: PathChoice, fork?: [string, string]) => void; onAssume: () => void
   onBack: () => void; onFinish: () => void; asHost: (a: Action) => Promise<string | null>; onExit: () => void
 }) {
   const summary = view.phase === 'summary'
@@ -63,7 +92,9 @@ export function WhatNextSheet({view, stage, project, single, onClose, onContinue
           <div class="next-group">
             <div class="next-label">Выбрать другой путь <span class="muted">· собранное не пропадёт{single ? '' : ', телефоны перейдут сами'}</span></div>
             {options.map(o => (
-              <Option key={o.choice} emoji={o.emoji} title={o.title} hint={o.hint} onClick={() => o.choice === 'assume' ? void assume() : onBranch(o.choice)} />
+              o.choice === 'fork'
+                ? <ForkOption key="fork" stage={stage} title={o.title} hint={o.hint} onFork={pair => onBranch('fork', pair)} />
+                : <Option key={o.choice} emoji={o.emoji} title={o.title} hint={o.hint} onClick={() => o.choice === 'assume' ? void assume() : onBranch(o.choice)} />
             ))}
           </div>
         )}

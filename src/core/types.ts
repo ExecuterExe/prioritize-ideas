@@ -1,6 +1,7 @@
 // Модель данных. Источник истины — объект Stage на ноутбуке организатора.
 
 import type {FieldValue, StageTemplate} from './template'
+import type {Branch} from './branches'
 import type {ComplianceValue, Passport} from './passport'
 import type {Assumption, AssumptionRound, Experiment} from './assume'
 import type {ParentLink} from './evolve'
@@ -59,6 +60,7 @@ export interface Card {
   parents?: ParentLink[]
   stepId?: string // режим «Карта пути»: к какому шагу относится барьер
   history?: CardVersion[] // прошлые формулировки после правок ведущего (до 5)
+  branchId?: string // ветка, в которой написана карточка
 }
 
 export interface CardVersion {
@@ -123,6 +125,8 @@ export interface MergeSuggestion {
 export interface Stage {
   id: string
   pinned?: string[] // закреплённые карточки: наверху и точно идут в оценку
+  branches?: Branch[] // развилка: две подгруппы с разными направлениями
+  branchOf?: Record<string, string> // участник → ветка
   carry?: string[] // отмечены «взять в следующий этап»
   carried?: number // мс, перенесённые с прошлого шага (закончили раньше)
   hostScreen?: boolean // Wi-Fi подвёл: сессия идёт на ноутбуке ведущего

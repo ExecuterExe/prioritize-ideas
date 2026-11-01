@@ -2,6 +2,7 @@
 import {useState} from 'preact/hooks'
 import type {PublicView} from '../core/engine'
 import {asText, cardSubtitle, cardTitle, formatValue} from '../core/template'
+import {BranchCompare} from './branches'
 import {Badges, CardBody, CountUp, Dist, Matrix} from './common'
 import {ComplianceCheck} from './passport'
 import {complianceItems, passportFilled, passportMarkdown} from '../core/passport'
@@ -40,6 +41,7 @@ export function ResultsView({view, send, canArgue, isHost = false, pid}: {view: 
   const critical = new Set(view.template.kind === 'risk' ? riskRows(res.cards, view.criteria, view.decisions).filter(x => x.critical).map(x => x.cardId) : [])
   return (
     <div class="stack stagger">
+      <BranchCompare view={view} />
       {leader && leaderCard && leader.score !== null && (
         <div class="card leader">
           <div class="row between" style={{alignItems: 'flex-start', position: 'relative', zIndex: 1}}>

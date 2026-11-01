@@ -4,9 +4,10 @@ import {computeResults} from './math'
 import {realCards} from './engine'
 import {asText, builtinTemplate, cardSubtitle, cardTitle, type FieldValue, type StageTemplate} from './template'
 import type {AssumptionCategory} from './assume'
-import type {Card, Criterion, Stage} from './types'
+import type {Card, Criterion, Settings, Stage} from './types'
+import {compareBranches} from './branches'
 
-export type PathChoice = 'continue' | 'reformulate' | 'another' | 'ideas' | 'journey' | 'rerate' | 'assume'
+export type PathChoice = 'continue' | 'reformulate' | 'another' | 'ideas' | 'journey' | 'rerate' | 'assume' | 'fork' | 'combine'
 
 export interface PathStep {
   stageId: string
@@ -22,7 +23,9 @@ export const CHOICE_LABEL: Record<PathChoice, string> = {
   ideas: '💡 идеи для выбранного',
   journey: '🗺 путь пользователя',
   rerate: '🔁 переоценка',
-  assume: '🎯 проверка предположений'
+  assume: '🎯 проверка предположений',
+  fork: '⑂ развилка',
+  combine: '🔀 объединение веток'
 }
 
 export interface BranchOption {
@@ -40,6 +43,8 @@ export interface BranchPlan {
   seedCards?: Record<string, FieldValue>[]
   seedCriteria?: Criterion[]
   persona?: string
+  branches?: {title: string; source?: string; sourceFields?: Record<string, FieldValue>}[]
+  settings?: Partial<Settings>
 }
 
 const LIST_LIMIT = 8
@@ -85,6 +90,8 @@ export function branchOptions(stage: Stage): BranchOption[] {
   }
   if (kind === 'problem' && focus) out.push({choice: 'ideas', emoji: '💡', title: 'Идеи для этой проблемы', hint: `Генерация идей для «${cardTitle(stage.template, focus.fields)}»`})
   if (mode !== 'journey') out.push({choice: 'journey', emoji: '🗺', title: 'Исследовать путь пользователя', hint: 'Карта пути: где человеку больнее всего. Барьеры потом станут проблемами'})
+  if (mode !== 'journey' && mode !== 'board' && realCards(stage).length >= 2) out.push({choice: 'fork', emoji: '⑂', title: 'Развилка: две ветки', hint: 'Команда делится на две подгруппы, каждая развивает своё направление; оцениваем вместе'})
+  if (canCombine(stage)) out.push({choice: 'combine', emoji: '🔀', title: 'Объединить лучшее из веток', hint: 'Лидеры обеих веток — на стол; шаг «Развитие» поможет собрать из них одно'})
   if (focus) out.push({choice: 'assume', emoji: '🎯', title: 'Проверить предположения', hint: 'Что должно быть правдой, чтобы лидер сработал. Без нового этапа'})
   return out
 }
@@ -122,8 +129,50 @@ export function planBranch(stage: Stage, choice: PathChoice): BranchPlan | undef
         sourceProblem: stage.sourceProblem, sourceFields: stage.sourceFields
       }
     }
+    case 'combine':
+      return planCombine(stage)
     default:
       return undefined
+  }
+}
+
+// Тип этапа для развилки: от проблем — к идеям, иначе тот же
+export function forkTemplate(stage: Stage): StageTemplate | undefined {
+  return stage.template.kind === 'problem' ? builtinTemplate('idea') : stage.template
+}
+
+// Развилка по двум карточкам: у каждой ветки своя исходная
+export function planFork(stage: Stage, cardIds: [string, string]): BranchPlan | undefined {
+  const tpl = forkTemplate(stage)
+  const cards = cardIds.map(id => stage.cards.find(c => c.id === id))
+  if (!tpl || cards.some(c => !c) || cardIds[0] === cardIds[1]) return undefined
+  return {
+    template: tpl, title: `${tpl.name}: две ветки`,
+    sourceProblem: 'Команда разделилась на две ветки — у каждой своё направление',
+    branches: cards.map(c => ({title: cardTitle(stage.template, c!.fields), source: label(stage.template, c!), sourceFields: c!.fields}))
+  }
+}
+
+function branchLeaders(stage: Stage) {
+  if (!stage.branches || !stage.finalists.length || !stage.ratings.length) return []
+  return compareBranches(stage.branches, stage.cards, stage.branchOf ?? {}, computeResults(stage), stage.criteria)
+    .map(b => b.leader && stage.cards.find(c => c.id === b.leader!.cardId)).filter((c): c is Card => !!c)
+}
+
+export function canCombine(stage: Stage): boolean {
+  return branchLeaders(stage).length === 2
+}
+
+// Объединение: лидеры обеих веток — исходные карточки, «Развитие» включено, чтобы их скрестить
+export function planCombine(stage: Stage): BranchPlan | undefined {
+  const leaders = branchLeaders(stage)
+  if (leaders.length !== 2) return undefined
+  const [a, b] = leaders.map(c => cardTitle(stage.template, c.fields))
+  return {
+    template: stage.template, title: `${stage.template.name}: объединение веток`,
+    sourceProblem: `Собираем лучшее из двух веток: «${a}» и «${b}»`,
+    seedCards: leaders.map(c => c.fields),
+    settings: {evolve: true}
   }
 }
 

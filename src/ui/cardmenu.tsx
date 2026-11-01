@@ -15,9 +15,11 @@ export function CardMarks({view, card, onHistory}: {view: PublicView; card: Publ
   const pinned = view.pinned.includes(card.id)
   const carry = view.carry.includes(card.id)
   const edits = card.history?.length ?? 0
-  if (!pinned && !carry && !edits) return null
+  const branch = view.branches?.find(b => b.id === card.branchId)
+  if (!pinned && !carry && !edits && !branch) return null
   return (
     <div class="row" style={{gap: 4}}>
+      {branch && <span class="chip" title={branch.title}><span class="branch-tag">{branch.id}</span> {branch.title.slice(0, 24)}</span>}
       {pinned && <span class="chip accent" title="Точно идёт в оценку">📌 закреплено</span>}
       {carry && <span class="chip ok" title="Можно взять исходной в следующем этапе">↗ в следующий этап</span>}
       {edits > 0 && <button class="chip chip-btn" onClick={onHistory} title="Посмотреть прошлые формулировки">✏️ изменено · было так</button>}

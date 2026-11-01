@@ -38,7 +38,7 @@ describe('route', () => {
 
   it('offers problem branches and plans them from the leader', () => {
     const s = rated()
-    expect(branchOptions(s).map(o => o.choice)).toEqual(['reformulate', 'another', 'ideas', 'journey', 'assume'])
+    expect(branchOptions(s).map(o => o.choice)).toEqual(['reformulate', 'another', 'ideas', 'journey', 'fork', 'assume'])
     const ideas = planBranch(s, 'ideas')!
     expect(ideas.template.id).toBe('idea')
     expect(ideas.sourceProblem).toContain('Не знают расписание пересдач')

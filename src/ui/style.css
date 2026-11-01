@@ -664,3 +664,14 @@ details.card-menu { position: absolute; top: 8px; right: 8px; z-index: 5; }
 details.card-menu > summary { padding: 0 10px; font-size: 1.2rem; line-height: 1.6; color: var(--muted); }
 .merge-card { padding-right: 44px; }
 .chip-btn { border: 0; cursor: pointer; min-height: 0; height: auto; font-family: inherit; box-shadow: none; }
+
+/* Ветки */
+.branch-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; }
+.branch-choice { flex-direction: column; align-items: flex-start; justify-content: flex-start; text-align: left; gap: 4px; height: auto; padding: 12px 14px; border-radius: var(--radius-sm); }
+.branch-choice small { color: var(--muted); font-weight: 600; }
+.branch-col { display: flex; flex-direction: column; gap: 6px; padding: 12px; border-radius: var(--radius-sm); background: var(--surface-2); }
+.branch-col.best { box-shadow: 0 0 0 2px var(--mint); }
+.branch-tag { display: inline-grid; place-items: center; min-width: 22px; height: 22px; padding: 0 6px; border-radius: 999px; background: var(--violet); color: #fff; font-size: .75rem; font-weight: 800; }
+.branch-bar { display: grid; grid-template-columns: minmax(80px, 1fr) 2fr 32px; align-items: center; gap: 6px; }
+.branch-bar .bar { height: 8px; border-radius: 999px; background: var(--surface); overflow: hidden; }
+.branch-bar .bar i { display: block; height: 100%; background: linear-gradient(90deg, var(--violet), var(--mint)); }

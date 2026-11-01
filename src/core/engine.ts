@@ -15,6 +15,7 @@ import {autoVerdict, roundAverages, type Assumption, type AssumptionCategory, ty
 import {approvalQuota, calibrationSpread, computeResults, pickFinalists, type Results} from './math'
 import {criterionReady} from './lint'
 import {TIMINGS, carryOver} from './timing'
+import {autoAssign, makeBranches, smallestBranch, type Branch} from './branches'
 
 export const uid = (n = 10) => {
   const a = new Uint8Array(n)
@@ -34,6 +35,7 @@ export function createStage(opts: {
   sourceProblem?: string; sourceFields?: Record<string, FieldValue>; refOptions?: {id: string; title: string}[]
   passport?: Passport; assumptions?: Assumption[]; experiments?: Experiment[]
   seedCards?: Record<string, FieldValue>[]; seedCriteria?: Criterion[]; persona?: string; tasks?: Task[]; now: number
+  branches?: {title: string; source?: string; sourceFields?: Record<string, FieldValue>}[]
 }): Stage {
   const settings = {...DEFAULT_SETTINGS, ...opts.settings}
   if (settings.timePreset === 'express') { settings.calibration = false; settings.secondRound = false; settings.evolve = false }
@@ -55,7 +57,8 @@ export function createStage(opts: {
     // Критерии прошлого раунда (переоценка): сразу утверждены
     criteria: (opts.seedCriteria ?? []).map(c => ({...structuredClone(c), approved: true})), calibration: [], approvals: [], finalists: [], ratings: [], bases: [],
     submitted: {}, args: [], decisions: [], mergeSuggestions: [], calibRevealed: false,
-    disputedForRound2: [], round2Done: false, version: 1, createdAt: opts.now
+    disputedForRound2: [], round2Done: false, version: 1, createdAt: opts.now,
+    ...(opts.branches?.length === 2 ? {branches: makeBranches(opts.branches), branchOf: {}} : {})
   }
 }
 
@@ -139,6 +142,8 @@ export type Action =
   | {type: 'card.pin'; id: string; on: boolean}
   | {type: 'card.duplicate'; id: string; newId: string}
   | {type: 'card.carry'; id: string; on: boolean}
+  | {type: 'branch.join'; branchId: string}
+  | {type: 'branch.assign'; pid: string; branchId: string}
   | {type: 'merge.suggest'; a: string; b: string}
   | {type: 'card.develop'; id: string; parentId: string; fields: Record<string, FieldValue>; basis?: Basis}
   | {type: 'card.combine'; id: string; parentIds: string[]; fields: Record<string, FieldValue>; basis?: Basis}
@@ -184,7 +189,7 @@ export type Action =
 
 export const HOST_ONLY = new Set<Action['type']>([
   'phase.next', 'phase.back', 'deadline.extend', 'session.hostScreen',
-  'card.edit', 'card.restore', 'card.pin', 'card.duplicate', 'card.carry', 'merge', 'unmerge', 'suggestion.dismiss', 'criterion.addLibrary',
+  'card.edit', 'card.restore', 'card.pin', 'card.duplicate', 'card.carry', 'branch.assign', 'merge', 'unmerge', 'suggestion.dismiss', 'criterion.addLibrary',
   'criterion.update', 'criterion.remove', 'criterion.addCustom', 'settings.update', 'participant.setActive',
   'participant.add', 'participant.rename', 'calib.reveal', 'round2.start', 'decision.set',
   'passport.update', 'compliance.set', 'criterion.addFromPassport', 'round.open', 'round.reveal', 'round.close',
@@ -232,6 +237,8 @@ function enterPhase(s: Stage, phase: Phase, now: number, carry = false) {
   s.deadline = deadlineFor(s.settings, phase, now)
   s.carried = s.deadline && extra ? extra : undefined
   if (s.deadline && extra) s.deadline += extra
+  // Генерация по веткам: кто не выбрал — раскладываем поровну
+  if (phase === 'generate' && s.branches) s.branchOf = autoAssign(s.branches, s.branchOf ?? {}, activeParticipants(s).map(p => p.id))
   if (phase === 'criteria' && s.criteria.length === 0) {
     s.criteria = s.template.defaultCriteria.map(k => fromLibrary(k, uid()))
   }
@@ -306,7 +313,12 @@ export function reduce(stage: Stage, action: Action, actor: string, isHost: bool
         const limit = s.journey ? BARRIER_LIMIT : s.settings.cardLimit
         if (mine >= limit) fail(`Лимит — ${limit} карточки на человека`)
         if (s.journey && !s.journey.steps.some(x => x.id === action.stepId)) fail('Выберите шаг пути')
-        s.cards.push({id: action.id, authorIds: [actor], fields, basis: action.basis, mergedFrom: [], createdAt: now, stepId: s.journey ? action.stepId : undefined})
+        let branchId: string | undefined
+        if (s.branches) {
+          branchId = s.branchOf?.[actor] ?? smallestBranch(s.branches, s.branchOf ?? {}, activeParticipants(s).map(p => p.id))
+          s.branchOf = {...s.branchOf, [actor]: branchId}
+        }
+        s.cards.push({id: action.id, authorIds: [actor], fields, basis: action.basis, mergedFrom: [], createdAt: now, stepId: s.journey ? action.stepId : undefined, branchId})
       }
       break
     }
@@ -549,7 +561,19 @@ export function reduce(stage: Stage, action: Action, actor: string, isHost: bool
       if (s.phase !== 'merge') fail('Дублировать можно на шаге склейки')
       const c = s.cards.find(x => x.id === action.id) ?? fail('Карточка не найдена')
       if (s.cards.some(x => x.id === action.newId)) break
-      s.cards.splice(s.cards.indexOf(c) + 1, 0, {id: action.newId.slice(0, 20), authorIds: [], fields: structuredClone(c.fields), mergedFrom: [], createdAt: now})
+      s.cards.splice(s.cards.indexOf(c) + 1, 0, {id: action.newId.slice(0, 20), authorIds: [], fields: structuredClone(c.fields), mergedFrom: [], createdAt: now, branchId: c.branchId})
+      break
+    }
+
+    case 'branch.join':
+    case 'branch.assign': {
+      const branches = s.branches ?? fail('В этом этапе нет веток')
+      if (s.phase !== 'lobby' && s.phase !== 'generate') fail('Ветку можно сменить до конца генерации')
+      if (!branches.some(b => b.id === action.branchId)) fail('Нет такой ветки')
+      const pid = action.type === 'branch.assign' ? action.pid : actor
+      if (!s.participants.some(p => p.id === pid)) fail('Сначала войдите в комнату')
+      // Уже написанные карточки остаются в своей ветке
+      s.branchOf = {...s.branchOf, [pid]: action.branchId}
       break
     }
 
@@ -978,6 +1002,7 @@ export interface PublicCard {
   parents?: ParentLink[]
   stepId?: string
   history?: {fields: Record<string, FieldValue>; at: number}[]
+  branchId?: string
 }
 
 export interface PublicView {
@@ -1023,6 +1048,8 @@ export interface PublicView {
   mergeSuggestions: {a: string; b: string}[]
   pinned: string[]
   carry: string[]
+  branches?: Branch[]
+  branchOf: Record<string, string>
   disputedForRound2: string[]
   round2Done: boolean
   progress: Record<string, boolean>
@@ -1044,7 +1071,8 @@ export function publicView(s: Stage, now: number): PublicView {
     num: s.cards.indexOf(c) + 1,
     stepId: c.stepId,
     parents: c.parents,
-    ...(c.history?.length ? {history: c.history} : {})
+    ...(c.history?.length ? {history: c.history} : {}),
+    ...(c.branchId ? {branchId: c.branchId} : {})
   })
   // Во время генерации чужие карточки скрыты — видно только их количество
   const hideCards = s.phase === 'lobby' || s.phase === 'generate'
@@ -1102,6 +1130,7 @@ export function publicView(s: Stage, now: number): PublicView {
     decisions: s.decisions,
     mergeSuggestions: s.mergeSuggestions.map(({a, b}) => ({a, b})),
     pinned: hideCards ? [] : s.pinned ?? [], carry: hideCards ? [] : s.carry ?? [],
+    branches: s.branches, branchOf: s.branchOf ?? {},
     disputedForRound2: s.disputedForRound2,
     round2Done: s.round2Done,
     progress,
